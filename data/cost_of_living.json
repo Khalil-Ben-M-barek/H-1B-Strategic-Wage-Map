@@ -1,0 +1,242 @@
+{
+    "10180": {
+        "areaName": "Abilene, TX",
+        "colIndex": 85
+    },
+    "10420": {
+        "areaName": "Akron, OH",
+        "colIndex": 88
+    },
+    "10580": {
+        "areaName": "Albany-Schenectady-Troy, NY",
+        "colIndex": 98
+    },
+    "10740": {
+        "areaName": "Albuquerque, NM",
+        "colIndex": 92
+    },
+    "11260": {
+        "areaName": "Anchorage, AK",
+        "colIndex": 125
+    },
+    "12060": {
+        "areaName": "Atlanta-Sandy Springs-Roswell, GA",
+        "colIndex": 105
+    },
+    "12420": {
+        "areaName": "Austin-Round Rock, TX",
+        "colIndex": 110
+    },
+    "12540": {
+        "areaName": "Bakersfield, CA",
+        "colIndex": 95
+    },
+    "12580": {
+        "areaName": "Baltimore-Columbia-Towson, MD",
+        "colIndex": 115
+    },
+    "13820": {
+        "areaName": "Birmingham-Hoover, AL",
+        "colIndex": 87
+    },
+    "14460": {
+        "areaName": "Boston-Cambridge-Newton, MA-NH",
+        "colIndex": 150
+    },
+    "15380": {
+        "areaName": "Buffalo-Cheektowaga-Niagara Falls, NY",
+        "colIndex": 90
+    },
+    "16740": {
+        "areaName": "Charlotte-Concord-Gastonia, NC-SC",
+        "colIndex": 98
+    },
+    "16980": {
+        "areaName": "Chicago-Naperville-Elgin, IL-IN-WI",
+        "colIndex": 112
+    },
+    "17140": {
+        "areaName": "Cincinnati, OH-KY-IN",
+        "colIndex": 92
+    },
+    "17460": {
+        "areaName": "Cleveland-Elyria, OH",
+        "colIndex": 90
+    },
+    "17820": {
+        "areaName": "Colorado Springs, CO",
+        "colIndex": 100
+    },
+    "17900": {
+        "areaName": "Columbia, SC",
+        "colIndex": 88
+    },
+    "18140": {
+        "areaName": "Columbus, OH",
+        "colIndex": 95
+    },
+    "19100": {
+        "areaName": "Dallas-Fort Worth-Arlington, TX",
+        "colIndex": 105
+    },
+    "19740": {
+        "areaName": "Denver-Aurora-Lakewood, CO",
+        "colIndex": 118
+    },
+    "19804": {
+        "areaName": "Detroit-Warren-Dearborn, MI",
+        "colIndex": 95
+    },
+    "23420": {
+        "areaName": "Fresno, CA",
+        "colIndex": 92
+    },
+    "24340": {
+        "areaName": "Grand Rapids-Wyoming, MI",
+        "colIndex": 88
+    },
+    "26420": {
+        "areaName": "Houston-The Woodlands-Sugar Land, TX",
+        "colIndex": 100
+    },
+    "26900": {
+        "areaName": "Indianapolis-Carmel-Anderson, IN",
+        "colIndex": 90
+    },
+    "27260": {
+        "areaName": "Jacksonville, FL",
+        "colIndex": 92
+    },
+    "28140": {
+        "areaName": "Kansas City, MO-KS",
+        "colIndex": 92
+    },
+    "29820": {
+        "areaName": "Las Vegas-Henderson-Paradise, NV",
+        "colIndex": 105
+    },
+    "31080": {
+        "areaName": "Los Angeles-Long Beach-Anaheim, CA",
+        "colIndex": 160
+    },
+    "32820": {
+        "areaName": "Memphis, TN-MS-AR",
+        "colIndex": 85
+    },
+    "33100": {
+        "areaName": "Miami-Fort Lauderdale-West Palm Beach, FL",
+        "colIndex": 120
+    },
+    "33340": {
+        "areaName": "Milwaukee-Waukesha-West Allis, WI",
+        "colIndex": 95
+    },
+    "33460": {
+        "areaName": "Minneapolis-St. Paul-Bloomington, MN-WI",
+        "colIndex": 105
+    },
+    "34980": {
+        "areaName": "Nashville-Davidson--Murfreesboro--Franklin, TN",
+        "colIndex": 100
+    },
+    "35380": {
+        "areaName": "New Orleans-Metairie, LA",
+        "colIndex": 92
+    },
+    "35620": {
+        "areaName": "New York-Newark-Jersey City, NY-NJ-PA",
+        "colIndex": 180
+    },
+    "36420": {
+        "areaName": "Oklahoma City, OK",
+        "colIndex": 85
+    },
+    "36740": {
+        "areaName": "Orlando-Kissimmee-Sanford, FL",
+        "colIndex": 100
+    },
+    "37980": {
+        "areaName": "Philadelphia-Camden-Wilmington, PA-NJ-DE-MD",
+        "colIndex": 115
+    },
+    "38060": {
+        "areaName": "Phoenix-Mesa-Scottsdale, AZ",
+        "colIndex": 102
+    },
+    "38300": {
+        "areaName": "Pittsburgh, PA",
+        "colIndex": 90
+    },
+    "38900": {
+        "areaName": "Portland-Vancouver-Hillsboro, OR-WA",
+        "colIndex": 125
+    },
+    "39580": {
+        "areaName": "Raleigh, NC",
+        "colIndex": 98
+    },
+    "40060": {
+        "areaName": "Richmond, VA",
+        "colIndex": 95
+    },
+    "40140": {
+        "areaName": "Riverside-San Bernardino-Ontario, CA",
+        "colIndex": 110
+    },
+    "40380": {
+        "areaName": "Rochester, NY",
+        "colIndex": 92
+    },
+    "40900": {
+        "areaName": "Sacramento--Roseville--Arden-Arcade, CA",
+        "colIndex": 120
+    },
+    "41180": {
+        "areaName": "St. Louis, MO-IL",
+        "colIndex": 88
+    },
+    "41620": {
+        "areaName": "Salt Lake City, UT",
+        "colIndex": 100
+    },
+    "41700": {
+        "areaName": "San Antonio-New Braunfels, TX",
+        "colIndex": 90
+    },
+    "41740": {
+        "areaName": "San Diego-Carlsbad, CA",
+        "colIndex": 155
+    },
+    "41860": {
+        "areaName": "San Francisco-Oakland-Hayward, CA",
+        "colIndex": 170
+    },
+    "41940": {
+        "areaName": "San Jose-Sunnyvale-Santa Clara, CA",
+        "colIndex": 175
+    },
+    "42660": {
+        "areaName": "Seattle-Tacoma-Bellevue, WA",
+        "colIndex": 145
+    },
+    "45300": {
+        "areaName": "Tampa-St. Petersburg-Clearwater, FL",
+        "colIndex": 95
+    },
+    "45780": {
+        "areaName": "Toledo, OH",
+        "colIndex": 85
+    },
+    "46060": {
+        "areaName": "Tucson, AZ",
+        "colIndex": 90
+    },
+    "47260": {
+        "areaName": "Virginia Beach-Norfolk-Newport News, VA-NC",
+        "colIndex": 98
+    },
+    "47900": {
+        "areaName": "Washington-Arlington-Alexandria, DC-VA-MD-WV",
+        "colIndex": 140
+    }
+}
