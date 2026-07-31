@@ -276,11 +276,15 @@ def topology_to_geojson(topology, object_name=None):
         coords = _geometry_arcs_to_coordinates(gtype, geom.get("arcs", []), decoded_arcs)
         if coords is None:
             continue
-        fid = str(geom.get("id", ""))
+        fid = str(geom.get("id", "")).zfill(5) if geom.get("id") is not None else ""
+        props = dict(geom.get("properties", {}))
+        if not props.get("name") and props.get("NAME"):
+            props["name"] = props["NAME"]
+        props["fips"] = fid
         features.append({
             "type": "Feature",
             "id": fid,
-            "properties": dict(geom.get("properties", {}), fips=fid),
+            "properties": props,
             "geometry": {"type": gtype, "coordinates": coords}
         })
     return {"type": "FeatureCollection", "features": features}, object_name
@@ -288,11 +292,11 @@ def topology_to_geojson(topology, object_name=None):
 def build_county_shapes_df(counties_geojson):
     rows = []
     for feat in counties_geojson["features"]:
-        fips = feat["id"]
+        fips = str(feat["id"]).zfill(5)
         if len(fips) < 5:
             continue
         state_fips = fips[:2]
-        name = feat["properties"].get("name", "")
+        name = feat["properties"].get("name", "") or feat["properties"].get("NAME", "")
         rows.append({
             "fips": fips,
             "name": name,
@@ -421,27 +425,39 @@ def bucket_fill_color(category):
         return NO_DATA_COLOR, HEX_BORDER_COLOR
     return LEVEL_COLORS[category], HEX_BORDER_COLOR
 
-def add_hex_trace(fig, state, fill_color, border_color, hover_text, clickable=True):
-    cx, cy = state_hex_center(state)
-    xs, ys = hex_vertices(cx, cy, HEX_SIZE)
-    fig.add_trace(go.Scatter(
-        x=xs, y=ys, mode="lines", fill="toself",
-        fillcolor=fill_color, line=dict(color=border_color, width=1.2),
-        hoverinfo="skip", showlegend=False
-    ))
-    is_mobile = is_mobile_request()
+def _batch_hex_traces(fig, state_entries, is_mobile=False):
+    from collections import defaultdict
+    groups = defaultdict(lambda: {"xs": [], "ys": []})
+    cx_list, cy_list, texts, hover_list, custom_list = [], [], [], [], []
     label_size = 9 if is_mobile else 12
+    for entry in state_entries:
+        state = entry["state"]
+        cx, cy = state_hex_center(state)
+        xs, ys = hex_vertices(cx, cy, HEX_SIZE)
+        key = (entry["fill_color"], entry["border_color"])
+        groups[key]["xs"].extend(xs + [None])
+        groups[key]["ys"].extend(ys + [None])
+        cx_list.append(cx)
+        cy_list.append(cy)
+        texts.append(state)
+        hover_list.append(entry["hover_text"])
+        custom_list.append([state, entry["hover_text"]])
+    for (fill_color, border_color), pts in groups.items():
+        fig.add_trace(go.Scatter(
+            x=pts["xs"], y=pts["ys"], mode="lines", fill="toself",
+            fillcolor=fill_color, line=dict(color=border_color, width=1.2),
+            hoverinfo="skip", showlegend=False
+        ))
     fig.add_trace(go.Scatter(
-        x=[cx], y=[cy], mode="text", text=[state],
+        x=cx_list, y=cy_list, mode="text", text=texts,
         textfont=dict(size=label_size, color=LABEL_COLOR, family="Arial, sans-serif"),
         hoverinfo="skip", showlegend=False
     ))
-    if clickable:
-        fig.add_trace(go.Scatter(
-            x=[cx], y=[cy], mode="markers",
-            marker=dict(size=HEX_CLICK_MARKER_SIZE, color="rgba(0,0,0,0.02)"),
-            hoverinfo="text", text=hover_text, customdata=[state], showlegend=False
-        ))
+    fig.add_trace(go.Scatter(
+        x=cx_list, y=cy_list, mode="markers",
+        marker=dict(size=HEX_CLICK_MARKER_SIZE, color="rgba(0,0,0,0.02)"),
+        hoverinfo="text", text=hover_list, customdata=custom_list, showlegend=False
+    ))
 
 def add_bucket_legend(fig, x=1.0, y=0.5, yanchor="middle"):
     for bucket in BUCKET_ORDER:
@@ -531,34 +547,40 @@ def build_state_hex_figure(state_levels, salary, excluded_states, allowed_bucket
     excluded_states = set(excluded_states or [])
     allowed_buckets = set(allowed_buckets) if allowed_buckets else set(BUCKET_ORDER)
     fig = go.Figure()
+    hover_by_id = {}
+    state_entries = []
     for state in STATE_HEX_LAYOUT:
         row_data = row_by_state.get(state)
         bucket = row_data["bucket"] if row_data is not None else None
         category, is_excluded = classify_bucket(bucket, state, excluded_states, allowed_buckets)
         fill_color, border = bucket_fill_color(category)
         if row_data is None:
-            hover = f"<b>{state}</b><br>No wage data for {occ_label}"
+            base_hover = f"<b>{state}</b><br>No wage data for {occ_label}"
         else:
-            hover = (
+            base_hover = (
                 f"<b>{state}</b> ({int(row_data['n_areas'])} area(s), median)<br>"
                 f"Target salary: {format_money(salary)}<br>"
                 f"Triggerable level: <b>{bucket}</b><br>"
                 f"L1 {format_money(row_data['L1'])} | L2 {format_money(row_data['L2'])} | "
                 f"L3 {format_money(row_data['L3'])} | L4 {format_money(row_data['L4'])}"
             )
-        hover += "<br><i>(click to " + ("re-enable" if is_excluded else "exclude") + ")</i>"
-        add_hex_trace(fig, state, fill_color, border, hover)
+        hover_by_id[state] = base_hover
+        trace_hover = base_hover + "<br><i>(click to " + ("re-enable" if is_excluded else "exclude") + ")</i>"
+        state_entries.append({
+            "state": state, "fill_color": fill_color, "border_color": border, "hover_text": trace_hover
+        })
+    is_mobile = is_mobile_request()
+    _batch_hex_traces(fig, state_entries, is_mobile=is_mobile)
     if show_legend:
         add_bucket_legend(fig)
-    is_mobile = is_mobile_request()
+    fig.update_layout(meta={"hover_by_id": hover_by_id, "map_kind": "hex"})
     if is_mobile:
         margin = {"r": 5, "t": 10, "l": 5, "b": 5}
+        height = 240
     else:
         margin = {"r": 10, "t": 10, "l": 10, "b": 10} if map_id in ("compare-map-a", "compare-map-b") else None
-    if is_mobile:
-        height = 240 if map_id in ("compare-map-a", "compare-map-b") else 240
-    else:
-        height = 380 if map_id in ("compare-map-a", "compare-map-b") else 560
+        height = 400 if map_id in ("compare-map-a", "compare-map-b") else 560
+    
     return _finalize_hex_figure(fig, height=height, margin=margin, show_legend=show_legend, layout_id=map_id)
 
 DIVERGING_BLUE = (33, 102, 172)
@@ -578,6 +600,8 @@ def build_diff_hex_figure(state_levels_a, state_levels_b, label_a, label_b, excl
     excluded_states = set(excluded_states or [])
     allowed_buckets = set(allowed_buckets) if allowed_buckets else set(BUCKET_ORDER)
     fig = go.Figure()
+    hover_by_id = {}
+    state_entries = []
     for state in STATE_HEX_LAYOUT:
         ra, rb = a_by_state.get(state), b_by_state.get(state)
         bucket_a = ra["bucket"] if ra is not None else None
@@ -594,50 +618,63 @@ def build_diff_hex_figure(state_levels_a, state_levels_b, label_a, label_b, excl
             t = (MAX_BUCKET_DIFF - diff) / (2 * MAX_BUCKET_DIFF)
             fill_color, border = _diverging_color(t), HEX_BORDER_COLOR
         if bucket_a is None or bucket_b is None:
-            hover = f"<b>{state}</b><br>No data for one or both jobs"
+            base_hover = f"<b>{state}</b><br>No data for one or both jobs"
         else:
             verdict = ("Same level for both jobs" if bucket_a == bucket_b else
                         f"{label_a} can trigger a higher level" if BUCKET_INDEX[bucket_a] > BUCKET_INDEX[bucket_b] else
                         f"{label_b} can trigger a higher level")
-            hover = f"<b>{state}</b><br>{label_a}: {bucket_a}<br>{label_b}: {bucket_b}<br>{verdict}"
-        hover += "<br><i>(click to " + ("re-enable" if is_excluded else "exclude") + ")</i>"
-        add_hex_trace(fig, state, fill_color, border, hover)
+            base_hover = f"<b>{state}</b><br>{label_a}: {bucket_a}<br>{label_b}: {bucket_b}<br>{verdict}"
+        hover_by_id[state] = base_hover
+        trace_hover = base_hover + "<br><i>(click to " + ("re-enable" if is_excluded else "exclude") + ")</i>"
+        state_entries.append({
+            "state": state, "fill_color": fill_color, "border_color": border, "hover_text": trace_hover
+        })
     is_mobile = is_mobile_request()
+    _batch_hex_traces(fig, state_entries, is_mobile=is_mobile)
     if is_mobile:
         colorbar_config = dict(
             orientation="h",
-            y=-0.12,
+            y=-0.1,
             yanchor="top",
             x=0.5,
             xanchor="center",
             thickness=10,
             len=0.8,
             tickfont=dict(size=8),
-            tickvals=[0, 0.5, 1],
-            ticktext=[f"{label_a[:15]} higher", "Same", f"{label_b[:15]} higher"]
+            tickvals=[-6, -5, -4, -2, 0, 2, 4],
+            ticktext=["No data", "Excluded", "B higher", "", "Same", "", "A higher"]
         )
-        margin_config = {"r": 5, "t": 10, "l": 5, "b": 50}
+        margin_config = {"r": 10, "t": 10, "l": 5, "b": 50}
         height = 240
     else:
         colorbar_config = dict(
-            x=1.02, xanchor="left", len=0.8,
-            tickvals=[0, 0.5, 1],
-            ticktext=[f"{label_a} higher", "Same level", f"{label_b} higher"]
+            title="Level difference", x=1.02, xanchor="left",
+            tickvals=[-6, -5, -4, -2, 0, 2, 4],
+            ticktext=["No data", "Excluded", f"{label_b} higher", "", "Same", "", f"{label_a} higher"]
         )
         margin_config = {"r": 160, "t": 10, "l": 10, "b": 10}
-        height = 380
+        height = 400
+    diff_band_colors = [NO_DATA_COLOR, DEACTIVATED_COLOR] + [
+        _diverging_color((MAX_BUCKET_DIFF - diff) / (2 * MAX_BUCKET_DIFF))
+        for diff in range(-MAX_BUCKET_DIFF, MAX_BUCKET_DIFF + 1)
+    ]
+    diff_color_scale = []
+    diff_band_count = len(diff_band_colors)
+    for i, color in enumerate(diff_band_colors):
+        diff_color_scale.append([i / diff_band_count, color])
+        diff_color_scale.append([(i + 1) / diff_band_count, color])
     fig.add_trace(go.Scatter(
         x=[None], y=[None], mode="markers", showlegend=False,
         marker=dict(
-            size=0.1, color=[0, 0.5, 1],
-            colorscale=[[0, "rgb(%d,%d,%d)" % DIVERGING_BLUE],
-                         [0.5, "rgb(%d,%d,%d)" % DIVERGING_WHITE],
-                         [1, "rgb(%d,%d,%d)" % DIVERGING_RED]],
-            cmin=0, cmax=1, showscale=True,
+            size=0.1, color=[-6, -5, -4, -2, 0, 2, 4],
+            colorscale=diff_color_scale,
+            cmin=-6, cmax=4, showscale=True,
             colorbar=colorbar_config
         )
     ))
-    return _finalize_hex_figure(fig, height=height, margin=margin_config, title=None, show_legend=False, layout_id="compare-map-diff")
+    fig.update_layout(meta={"hover_by_id": hover_by_id, "map_kind": "hex"}, hovermode="closest")
+    fig = _finalize_hex_figure(fig, height=height, margin=margin_config, title=None, show_legend=False, layout_id="compare-map-diff")
+    return fig
 
 def get_county_centroid(fips, county_geojson):
     if not county_geojson or "features" not in county_geojson:
@@ -689,37 +726,47 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
     buckets = sub["bucket"].values
     fips_arr = sub["fips"].values
     states = sub["state"].values
-    counties = sub["county"].values
+    counties = sub["county"].values if "county" in sub.columns else sub["name"].values
+    names = sub["name"].values if "name" in sub.columns else counties
     l1s = sub["L1"].values
     l2s = sub["L2"].values
     l3s = sub["L3"].values
     l4s = sub["L4"].values
     z, locations, hover_text = [], [], []
-    for bucket, fips, state, county, l1, l2, l3, l4 in zip(
-        buckets, fips_arr, states, counties, l1s, l2s, l3s, l4s
+    for bucket, fips, state, county, name, l1, l2, l3, l4 in zip(
+        buckets, fips_arr, states, counties, names, l1s, l2s, l3s, l4s
     ):
         state_excluded = state in excluded_states
-        county_excluded = fips in excluded_counties
+        fips_str = str(fips).zfill(5) if str(fips).replace(".0","").isdigit() else str(fips)
+        county_excluded = fips_str in excluded_counties or str(fips) in excluded_counties
         is_valid = isinstance(bucket, str) and bucket in BUCKET_INDEX
         hidden = is_valid and bucket not in allowed_buckets
         is_disabled = state_excluded or county_excluded or hidden
         z_val = -2 if is_disabled else (-1 if not is_valid else BUCKET_INDEX[bucket])
-        locations.append(fips)
+        locations.append(fips_str)
         z.append(z_val)
-        label = f"<b>{county or '?'}, {state or '?'}</b><br>"
+        display_county = county if (isinstance(county, str) and county.strip()) else (name if isinstance(name, str) else None)
+        if display_county is None or (isinstance(display_county, float)):
+            display_county = "?"
+        label = f"<b>{display_county}, {state or '?'}</b><br>"
         if state_excluded:
-            hover_text.append(label + "Excluded (state disabled on the map)")
+            txt = label + "Excluded (state disabled on the map)"
+            txt += "<br><i>(click to re-enable state to view)</i>"
         elif county_excluded:
-            hover_text.append(label + "Excluded (county disabled on the map)")
+            txt = label + "Excluded (county disabled on the map)"
+            txt += "<br><i>(click to re-enable)</i>"
         elif bucket is None or pd.isna(bucket):
-            hover_text.append(label + "No wage data")
+            txt = label + "No wage data"
+            txt += "<br><i>(click to exclude)</i>"
         else:
-            hover_text.append(
+            txt = (
                 f"{label}Target salary: {format_money(salary)}<br>Triggerable level: <b>{bucket}</b><br>"
                 f"L1 {format_money(l1)} | L2 {format_money(l2)} | "
                 f"L3 {format_money(l3)} | L4 {format_money(l4)}"
                 + ("<br><i>(hidden by bucket filter)</i>" if hidden else "")
             )
+            txt += "<br><i>(click to exclude)</i>"
+        hover_text.append(txt)
     if not locations:
         fig = go.Figure()
         fig.update_layout(
@@ -735,8 +782,8 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
     for i, color in enumerate(band_colors):
         colorscale.append([i / n, color])
         colorscale.append([(i + 1) / n, color])
-    fig = go.Figure(go.Choroplethmapbox(
-        geojson=county_geojson, locations=locations, z=z,
+    fig = go.Figure(go.Choroplethmap(
+        geojson=get_county_geojson_url(state_filter), locations=locations, z=z,
         featureidkey="id", colorscale=colorscale, zmin=-2, zmax=4,
         marker_line_color=HEX_BORDER_COLOR, marker_line_width=0.4,
         text=hover_text, hoverinfo="text",
@@ -749,14 +796,14 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
         ) if show_legend else None
     ))
     lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
-    uirevision_val = str(state_filter) + ("_" + str(county_filter) if county_filter else "")
+    uirevision_val = f"county|{map_id}|{state_filter or ''}|{county_filter or ''}"
     is_mobile = is_mobile_request()
     if is_mobile:
-        height = 240 if map_id in ("compare-map-a", "compare-map-b") else 240
+        height = 240
     else:
-        height = 380 if map_id in ("compare-map-a", "compare-map-b") else 560
+        height = 400 if map_id in ("compare-map-a", "compare-map-b") else 560
     fig.update_layout(
-        mapbox=dict(
+        map=dict(
             style="carto-positron",
             center=dict(lat=lat, lon=lon),
             zoom=zoom
@@ -766,7 +813,8 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
             {"r": 10, "t": 10, "l": 10, "b": 0} if map_id in ("compare-map-a", "compare-map-b")
             else {"r": 90 if show_legend else 20, "t": 10, "l": 0, "b": 0}
         ),
-        height=height
+        height=height,
+        meta={"map_kind": "county"}
     )
     return fig
 
@@ -795,18 +843,29 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
         label = f"<b>{county or '?'}, {state or '?'}</b><br>"
         if is_disabled:
             z_val = -5
-            hover_text.append(f"{label}Excluded")
+            if state_excluded:
+                txt = f"{label}Excluded (state disabled on the map)"
+            else:
+                txt = f"{label}Excluded"
         elif not is_valid_a or not is_valid_b:
             z_val = -6
-            hover_text.append(f"{label}No wage data for one or both jobs")
+            txt = f"{label}No wage data for one or both jobs"
         else:
             diff = BUCKET_INDEX[bucket_a] - BUCKET_INDEX[bucket_b]
             z_val = diff
             verdict = ("Same level for both jobs" if bucket_a == bucket_b else
                         f"{label_a} can trigger a higher level" if BUCKET_INDEX[bucket_a] > BUCKET_INDEX[bucket_b] else
                         f"{label_b} can trigger a higher level")
-            hover_text.append(f"{label}{label_a}: {bucket_a}<br>{label_b}: {bucket_b}<br>{verdict}")
-        locations.append(fips)
+            txt = f"{label}{label_a}: {bucket_a}<br>{label_b}: {bucket_b}<br>{verdict}"
+        if state_excluded:
+            txt += "<br><i>(click to re-enable state to view)</i>"
+        elif county_excluded:
+            txt += "<br><i>(click to re-enable)</i>"
+        else:
+            txt += "<br><i>(click to exclude)</i>"
+        hover_text.append(txt)
+        fips_str = str(fips).zfill(5) if str(fips).isdigit() else str(fips)
+        locations.append(fips_str)
         z.append(z_val)
     if not locations:
         fig = go.Figure()
@@ -848,9 +907,9 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
             ticktext=["No data", "Excluded", f"{label_b} higher", "", "Same", "", f"{label_a} higher"]
         )
         margin_config = {"r": 160, "t": 10, "l": 0, "b": 0}
-        height = 380
-    fig = go.Figure(go.Choroplethmapbox(
-        geojson=county_geojson, locations=locations, z=z,
+        height = 500
+    fig = go.Figure(go.Choroplethmap(
+        geojson=get_county_geojson_url(state_filter), locations=locations, z=z,
         featureidkey="id", colorscale=colorscale, zmin=-6, zmax=4,
         marker_line_color=HEX_BORDER_COLOR, marker_line_width=0.4,
         text=hover_text, hoverinfo="text",
@@ -859,15 +918,17 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
         colorbar=colorbar_config
     ))
     lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
-    uirevision_val = str(state_filter) + ("_" + str(county_filter) if county_filter else "")
+    uirevision_val = f"diff|{state_filter or ''}|{county_filter or ''}"
     fig.update_layout(
-        mapbox=dict(
+        map=dict(
             style="carto-positron",
             center=dict(lat=lat, lon=lon),
-            zoom=zoom
+            zoom=zoom,
+            domain=dict(x=[0, 0.94], y=[0, 1])
         ),
         uirevision=uirevision_val,
-        margin=margin_config, height=height
+        margin=margin_config, height=height,
+        meta={"map_kind": "county-diff"}
     )
     return fig
 
@@ -936,20 +997,37 @@ class AppData:
 
 DATA: AppData = None
 
+_GEOJSON_BY_STATE = {}
+
 def get_county_geojson(state_filter=None):
     if DATA is None:
         return {"type": "FeatureCollection", "features": []}
-    if not state_filter:
+    key = (state_filter or "").upper()
+    cached = _GEOJSON_BY_STATE.get(key)
+    if cached is not None:
+        return cached
+    if not key:
+        _GEOJSON_BY_STATE[key] = DATA.county_geojson
         return DATA.county_geojson
     state_fips_prefixes = {v: k for k, v in FIPS_TO_STATE.items()}
-    target_prefix = state_fips_prefixes.get(state_filter.upper())
+    target_prefix = state_fips_prefixes.get(key)
     if not target_prefix:
+        _GEOJSON_BY_STATE[key] = DATA.county_geojson
         return DATA.county_geojson
-    filtered_features = [
-        feat for feat in DATA.county_geojson["features"]
-        if str(feat.get("id", "")).startswith(target_prefix)
-    ]
-    return {"type": "FeatureCollection", "features": filtered_features}
+    filtered = {
+        "type": "FeatureCollection",
+        "features": [
+            feat for feat in DATA.county_geojson["features"]
+            if str(feat.get("id", "")).startswith(target_prefix)
+        ]
+    }
+    _GEOJSON_BY_STATE[key] = filtered
+    return filtered
+
+def get_county_geojson_url(state_filter=None):
+    if state_filter:
+        return f"/assets/counties_10m.json?state={state_filter.upper()}"
+    return "/assets/counties_10m.json"
 
 def make_controls():
     return html.Div(className="controls-panel", children=[
@@ -1029,6 +1107,7 @@ def build_layout():
     return html.Div(className="app-shell", children=[
         dcc.Store(id="excluded-counties", data=[], storage_type="local"),
         dcc.Store(id="excluded-occupations", data=[], storage_type="local"),
+        dcc.Store(id="table-pins", data={}, storage_type="local"),
         html.Div(className="app-header", children=[
             html.H1("H-1B Strategic Wage Map"),
             html.P("Pick a job and a target salary to see which DOL prevailing "
@@ -1037,23 +1116,51 @@ def build_layout():
         ]),
         make_controls(),
         html.Div(id="view-explore", children=[
+            html.Div(className="phone-help", children=[
+                html.Div("Phone controls", className="phone-help-title"),
+                html.Ul([
+                    html.Li("Tap a state or county to enable or disable it."),
+                    html.Li("Touch and hold to inspect wage information."),
+                    html.Li("Slide while holding to inspect nearby regions."),
+                    html.Li("Pinch to zoom."),
+                    html.Li("Use two fingers to move the map.")
+                ])
+            ]),
             html.Div(className="map-panel", children=[
                 dcc.Graph(id="state-hex-map", responsive=True, config={"displayModeBar": False, "scrollZoom": True}),
+                html.Div(id="mobile-tooltip-explore", className="mobile-tooltip"),
                 build_explore_legend_html()
             ])
         ]),
         html.Div(id="view-compare", style={"display": "none"}, children=[
+            html.Div(className="phone-help", children=[
+                html.Div("Phone controls", className="phone-help-title"),
+                html.Ul([
+                    html.Li("Tap a state or county to enable or disable it."),
+                    html.Li("Touch and hold to inspect wage information."),
+                    html.Li("Slide while holding to inspect nearby regions."),
+                    html.Li("Pinch to zoom."),
+                    html.Li("Use two fingers to move the map.")
+                ])
+            ]),
             html.Div(className="compare-controls", children=[
                 html.Div([html.Label("Job A"), dcc.Dropdown(id="compare-occ-a", options=[], persistence=True, persistence_type="local")]),
                 html.Div([html.Label("Job B"), dcc.Dropdown(id="compare-occ-b", options=[], persistence=True, persistence_type="local")])
             ]),
             html.Div(className="compare-maps", children=[
-                dcc.Graph(id="compare-map-a", responsive=True, config={"displayModeBar": False, "scrollZoom": True}),
+                html.Div(className="compare-map-slot", children=[
+                    dcc.Graph(id="compare-map-a", responsive=True, config={"displayModeBar": False, "scrollZoom": True}),
+                    html.Div(id="mobile-tooltip-compare-a", className="mobile-tooltip")
+                ]),
                 html.Div(className="compare-legend-col", children=build_legend_html()),
-                dcc.Graph(id="compare-map-b", responsive=True, config={"displayModeBar": False, "scrollZoom": True})
+                html.Div(className="compare-map-slot", children=[
+                    dcc.Graph(id="compare-map-b", responsive=True, config={"displayModeBar": False, "scrollZoom": True}),
+                    html.Div(id="mobile-tooltip-compare-b", className="mobile-tooltip")
+                ])
             ]),
             html.Div(id="compare-map-diff-title", className="compare-diff-title"),
-            dcc.Graph(id="compare-map-diff", responsive=True, config={"displayModeBar": False, "scrollZoom": True})
+            dcc.Graph(id="compare-map-diff", responsive=True, config={"displayModeBar": False, "scrollZoom": True}),
+            html.Div(id="mobile-tooltip-compare-diff", className="mobile-tooltip")
         ]),
         html.Div(id="view-rank", style={"display": "none"}, children=[
             html.Div(className="rank-controls", children=[
@@ -1078,8 +1185,9 @@ def build_layout():
                             {"label": b, "value": b} for b in ["L1", "L2", "L3", "L4"]
                         ], value="L3", persistence=True, persistence_type="local")
                     ]),
-                    html.Div(style={"flex": "1", "minWidth": "200px", "display": "flex", "alignItems": "flex-end"}, children=[
-                        html.Button("Reset Deleted Occupations", id="reset-excluded-occupations-btn", n_clicks=0, style={"height": "36px", "width": "100%", "cursor": "pointer"})
+                    html.Div(style={"flex": "1", "minWidth": "200px", "display": "flex", "flexDirection": "column", "justifyContent": "flex-end", "gap": "6px"}, children=[
+                        html.Button("Reset Deleted Occupations", id="reset-excluded-occupations-btn", n_clicks=0, style={"fontSize": "11px", "padding": "4px 8px", "cursor": "pointer", "width": "100%"}),
+                        html.Button("Reset Pinned Occupations", id="reset-pinned-occupations-btn", n_clicks=0, style={"fontSize": "11px", "padding": "4px 8px", "cursor": "pointer", "width": "100%"})
                     ])
                 ])
             ]),
@@ -1112,19 +1220,24 @@ def build_layout():
                         {"if": {"column_id": "rank"}, "color": "#777", "fontWeight": "bold"}
                     ],
                     persistence=True,
-                    persistence_type="local"
+                    persistence_type="local",
+                    persisted_props=["sort_by"]
                 )
             ])
         ])
     ])
 
 APP_CSS = """
-.app-shell { font-family: Arial, sans-serif; max-width: 1280px; margin: 0 auto; padding: 16px; }
+.app-shell { font-family: Arial, sans-serif; max-width: 1500px; margin: 0 auto; padding: 16px 16px; }
 .app-header h1 { margin-bottom: 4px; }
 .app-header p { color: #555; margin-top: 0; }
-.controls-panel { display: flex; flex-wrap: wrap; gap: 16px; background: #f7f7f9;
+.controls-panel { display: flex; flex-wrap: wrap; gap: 16px; background: #f7f7f9; box-sizing: border-box;
     border: 1px solid #e2e2e6; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-.control-block { flex: 1 1 220px; min-width: 200px; }
+.control-block { flex: 1 1 240px; min-width: 220px; }
+.controls-panel > .control-block:nth-child(-n+5) { flex: 1 1 calc((100% - 64px) / 5); min-width: 0; }
+.controls-panel > .control-block:nth-child(6) { flex: 0 0 360px; min-width: 360px; max-width: 360px; }
+.controls-panel > .control-block:nth-child(7) { flex: 0 0 500px; min-width: 500px; max-width: 500px; }
+.controls-panel > .control-block:nth-child(8) { flex: 1 1 0; min-width: 340px; }
 .control-block label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
 .salary-field { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
 
@@ -1144,16 +1257,22 @@ APP_CSS = """
     margin-bottom: 16px !important;
 }
 
+#compare-map-diff {
+    width: 100% !important;
+    height: 500px !important;
+    margin-bottom: 32px !important;
+}
+
 .hint-text { color: #777; font-size: 12px; text-align: center; margin: 4px 0 0; }
 .compare-controls { display: flex; gap: 24px; margin-bottom: 8px; }
 .compare-controls > div { flex: 1; }
 .compare-maps { display: flex; align-items: center; justify-content: space-between !important; width: 100% !important; box-sizing: border-box !important; }
-.compare-legend-col { flex: 0 0 170px !important; display: flex !important; align-items: center !important; justify-content: center !important; height: 380px !important; }
+.compare-legend-col { flex: 0 0 150px !important; display: flex !important; align-items: center !important; justify-content: center !important; height: 400px !important; }
 .compare-maps > div:not(.compare-legend-col) {
-    width: calc(50% - 93px) !important;
-    flex: 0 0 calc(50% - 93px) !important;
+    width: calc(50% - 75px) !important;
+    flex: 0 0 calc(50% - 75px) !important;
     min-width: 0 !important;
-    height: 380px !important;
+    height: 400px !important;
 }
 
 .compare-maps .js-plotly-plot,
@@ -1227,26 +1346,136 @@ APP_CSS = """
     flex: 0 0 14px;
 }
 
-.js-plotly-plot .mapboxgl-canvas {
+.js-plotly-plot .mapboxgl-canvas,
+.js-plotly-plot .maplibregl-canvas {
     cursor: grab !important;
 }
-.js-plotly-plot .mapboxgl-canvas:active {
+.js-plotly-plot .mapboxgl-canvas:active,
+.js-plotly-plot .maplibregl-canvas:active {
     cursor: grabbing !important;
 }
 
 .js-plotly-plot:has(.hovertext) .nsewdrag {
     cursor: pointer !important;
 }
-.js-plotly-plot:has(.hovertext) .mapboxgl-canvas {
+.js-plotly-plot:has(.hovertext) .mapboxgl-canvas,
+.js-plotly-plot:has(.hovertext) .maplibregl-canvas {
     cursor: pointer !important;
 }
 
 .js-plotly-plot .plotly .hoverlayer {
-    transform: translate(12px, -4px) !important;
     pointer-events: none !important;
 }
 
+.phone-help {
+    display: none;
+}
+.mobile-tooltip {
+    display: none;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    height: 0;
+    overflow: hidden;
+}
+.mobile-tooltip.is-active {
+    display: block;
+    height: auto;
+    margin: 10px 0 8px 0;
+    padding: 8px 10px;
+    background: #f7f7f9;
+    color: #2b2b2b;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    word-break: break-word;
+}
+.mobile-tooltip .tt-title {
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+.mobile-tooltip .tt-body {
+    color: #333;
+    font-size: 12px;
+}
+.mobile-tooltip .tt-hint {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #777;
+    font-style: italic;
+}
+
 @media (max-width: 767px) {
+    .phone-help {
+        display: block !important;
+        background: #f0f4f8;
+        border: 1px solid #d0d7de;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: #333;
+    }
+    .phone-help-title {
+        font-weight: 700;
+        font-size: 13px;
+        margin-bottom: 4px;
+    }
+    .phone-help ul {
+        margin: 0;
+        padding-left: 18px;
+    }
+    .phone-help li {
+        margin: 2px 0;
+    }
+    .mobile-tooltip:not(.is-active) {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+    .compare-map-slot {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        min-width: 0;
+    }
+    .compare-maps .compare-map-slot .js-plotly-plot,
+    .compare-maps .compare-map-slot .plotly {
+        width: 100% !important;
+        height: 240px !important;
+    }
+    .js-plotly-plot .hoverlayer,
+    .js-plotly-plot .hovertext {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
+    #state-hex-map,
+    #compare-map-a,
+    #compare-map-b,
+    #compare-map-diff,
+    #state-hex-map .js-plotly-plot,
+    #compare-map-a .js-plotly-plot,
+    #compare-map-b .js-plotly-plot,
+    #compare-map-diff .js-plotly-plot,
+    #state-hex-map .mapboxgl-canvas,
+    #compare-map-a .mapboxgl-canvas,
+    #compare-map-b .mapboxgl-canvas,
+    #compare-map-diff .mapboxgl-canvas,
+    #state-hex-map .maplibregl-canvas,
+    #compare-map-a .maplibregl-canvas,
+    #compare-map-b .maplibregl-canvas,
+    #compare-map-diff .maplibregl-canvas {
+        touch-action: none !important;
+    }
     .compare-diff-title {
         font-size: 13px;
         margin-top: 16px;
@@ -1278,7 +1507,10 @@ APP_CSS = """
     .compare-maps > div:not(.compare-legend-col) {
         flex: none !important;
         width: 100% !important;
-        height: 240px !important;
+        height: auto !important;
+    }
+    .compare-map-slot {
+        height: auto !important;
     }
     .compare-legend-col {
         flex: none !important;
@@ -1333,6 +1565,7 @@ APP_CSS = """
         width: 100% !important;
         height: 350px !important;
         margin-top: 10px !important;
+        margin-bottom: 16px !important;
     }
     .rank-table-container {
         width: 100% !important;
@@ -1399,8 +1632,8 @@ def register_callbacks(app: dash.Dash):
             return dash.no_update, dash.no_update
         point = click_data["points"][0]
         custom_val = point.get("customdata")
-        if isinstance(custom_val, list):
-            custom_val = custom_val[0] if len(custom_val) > 0 else None
+        while isinstance(custom_val, (list, tuple)) and len(custom_val) > 0:
+            custom_val = custom_val[0]
         if custom_val is None:
             custom_val = point.get("location")
         if not custom_val:
@@ -1411,7 +1644,10 @@ def register_callbacks(app: dash.Dash):
                 excluded_states.remove(clicked_str)
             else:
                 excluded_states.append(clicked_str)
-        elif len(clicked_str) == 5 and clicked_str.isdigit():
+        elif clicked_str.isdigit():
+            clicked_str = clicked_str.zfill(5)
+            if len(clicked_str) != 5:
+                return dash.no_update, dash.no_update
             if clicked_str in excluded_counties:
                 excluded_counties.remove(clicked_str)
             else:
@@ -1478,9 +1714,9 @@ def register_callbacks(app: dash.Dash):
         combine_mode = combine_mode or "average"
         if level == "county":
             county_levels = DATA.county_levels_for(occ_codes, combine_mode, salary_val)
-            geojson_url = "/assets/counties_10m.json" if not inspect_state else f"/assets/counties_10m.json?state={inspect_state}"
+            geojson = get_county_geojson(inspect_state)
             return build_county_choropleth_figure(
-                geojson_url, county_levels, salary_val, buckets, 
+                geojson, county_levels, salary_val, buckets,
                 state_filter=inspect_state, excluded_states=excluded, excluded_counties=excluded_counties, map_id="state-hex-map", county_filter=inspect_county,
                 show_legend=False
             )
@@ -1496,10 +1732,13 @@ def register_callbacks(app: dash.Dash):
         Input("excluded-counties", "data"),
         Input("bucket-filter", "value"), Input("map-level", "value"),
         Input("inspect-state", "value"),
-        Input("inspect-county", "value")
+        Input("inspect-county", "value"),
+        Input("view-mode", "value")
     )
-    def update_compare(occ_a, occ_b, salary, excluded, excluded_counties, buckets, level, inspect_state, inspect_county):
+    def update_compare(occ_a, occ_b, salary, excluded, excluded_counties, buckets, level, inspect_state, inspect_county, view_mode):
         if DATA is None:
+            raise dash.exceptions.PreventUpdate
+        if view_mode != "compare":
             raise dash.exceptions.PreventUpdate
         salary_val = parse_number(salary, DEFAULT_TARGET_SALARY)
         if not occ_a or not occ_b:
@@ -1511,18 +1750,18 @@ def register_callbacks(app: dash.Dash):
         if level == "county":
             county_levels_a = DATA.county_levels_for([occ_a], "average", salary_val)
             county_levels_b = DATA.county_levels_for([occ_b], "average", salary_val)
-            geojson_url = "/assets/counties_10m.json" if not inspect_state else f"/assets/counties_10m.json?state={inspect_state}"
+            geojson = get_county_geojson(inspect_state)
             fig_a = build_county_choropleth_figure(
-                geojson_url, county_levels_a, salary_val, buckets, 
+                geojson, county_levels_a, salary_val, buckets,
                 state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-a", county_filter=inspect_county
             )
             fig_b = build_county_choropleth_figure(
-                geojson_url, county_levels_b, salary_val, buckets, 
+                geojson, county_levels_b, salary_val, buckets,
                 state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-b", county_filter=inspect_county
             )
             fig_diff = build_county_diff_figure(
-                geojson_url, county_levels_a, county_levels_b, 
-                label_a, label_b, buckets, state_filter=inspect_state, 
+                geojson, county_levels_a, county_levels_b,
+                label_a, label_b, buckets, state_filter=inspect_state,
                 excluded_states=excluded, excluded_counties=excluded_counties, county_filter=inspect_county
             )
             title_text = f"County Difference: {label_a} vs {label_b}"
@@ -1536,6 +1775,8 @@ def register_callbacks(app: dash.Dash):
     @app.callback(
         Output("rank-table", "data"),
         Output("excluded-occupations", "data"),
+        Output("table-pins", "data"),
+        Output("rank-table", "sort_by"),
         Output("rank-table-validation-msg", "children"),
         Input("view-mode", "value"),
         Input("rank-state-filter", "value"),
@@ -1545,17 +1786,31 @@ def register_callbacks(app: dash.Dash):
         Input("rank-table", "data_timestamp"),
         Input("rank-table", "sort_by"),
         Input("reset-excluded-occupations-btn", "n_clicks"),
+        Input("reset-pinned-occupations-btn", "n_clicks"),
         State("rank-table", "data"),
-        State("excluded-occupations", "data")
+        State("excluded-occupations", "data"),
+        State("table-pins", "data")
     )
-    def update_rank_table(view_mode, state_filter, min_salary, max_salary, desired_level, _ts, sort_by, reset_clicks, current_table_data, excluded_occupations):
+    def update_rank_table(view_mode, state_filter, min_salary, max_salary, desired_level, _ts, sort_by, reset_clicks, reset_pin_clicks, current_table_data, excluded_occupations, table_pins):
         if DATA is None:
             raise dash.exceptions.PreventUpdate
         if view_mode != "rank":
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         triggered_id = ctx.triggered_id
         excluded_occupations = excluded_occupations or []
+        table_pins = table_pins or {}
         validation_msg = ""
+        triggered_prop = ""
+        if ctx.triggered:
+            triggered_prop = ctx.triggered[0]["prop_id"]
+        sort_by = sort_by or []
+        if triggered_prop == "rank-table.sort_by" and not sort_by:
+            sort_by = [{"column_id": "required_salary", "direction": "asc"}]
+        else:
+            for s in sort_by:
+                if not s.get("direction"):
+                    s["direction"] = "asc"
+        
         if current_table_data:
             for row in current_table_data:
                 val = str(row.get("custom_rank", "")).strip()
@@ -1566,6 +1821,8 @@ def register_callbacks(app: dash.Dash):
                         validation_msg = "⚠️ Warning: Pin to position must be a number (e.g. 1, 2)."
         if triggered_id == "reset-excluded-occupations-btn":
             excluded_occupations = []
+        elif triggered_id == "reset-pinned-occupations-btn":
+            table_pins = {}
         min_salary_val = parse_number(min_salary, 0.0)
         max_salary_val = parse_number(max_salary, float("inf"))
         desired_level = desired_level or "L3"
@@ -1578,7 +1835,7 @@ def register_callbacks(app: dash.Dash):
         ).reset_index()
         df_merged = DATA.df_occ.merge(df_agg, left_on="code", right_on="occupation_code", how="inner")
         if df_merged.empty:
-            return [], excluded_occupations, validation_msg
+            return [], excluded_occupations, table_pins, sort_by, validation_msg
         l1, l2, l3, l4 = df_merged["L1"].values, df_merged["L2"].values, df_merged["L3"].values, df_merged["L4"].values
         if desired_level == "L1":
             t_d = l1
@@ -1591,31 +1848,35 @@ def register_callbacks(app: dash.Dash):
         valid_mask = (t_d >= min_salary_val) & (t_d <= max_salary_val) & (~pd.isna(t_d))
         df_filtered = df_merged[valid_mask].copy()
         if df_filtered.empty:
-            return [], excluded_occupations, validation_msg
+            return [], excluded_occupations, table_pins, sort_by, validation_msg
         S = t_d[valid_mask]
         df_filtered["required_salary"] = S
         expected_codes = set(df_filtered["code"].tolist())
         if triggered_id == "rank-table" and current_table_data is not None:
+            for row in current_table_data:
+                code = row.get("code")
+                pin = row.get("custom_rank")
+                if code:
+                    if pin not in (None, ""):
+                        table_pins[code] = pin
+                    elif code in table_pins:
+                        del table_pins[code]
             current_codes = {r.get("code") for r in current_table_data if r.get("code")}
             newly_deleted = (expected_codes - set(excluded_occupations)) - current_codes
             if newly_deleted:
                 excluded_occupations.extend(list(newly_deleted))
+                for code in newly_deleted:
+                    if code in table_pins:
+                        del table_pins[code]
                 df_filtered = df_filtered[~df_filtered["code"].isin(excluded_occupations)]
             else:
                 resorted = _rank_sort(current_table_data, sort_by)
-                return resorted, excluded_occupations, validation_msg
+                return resorted, excluded_occupations, table_pins, sort_by, validation_msg
         df_filtered = df_filtered[~df_filtered["code"].isin(excluded_occupations)]
-        custom_rank_map = {}
-        if current_table_data:
-            custom_rank_map = {
-                row.get("code"): row.get("custom_rank")
-                for row in current_table_data
-                if row.get("code") and row.get("custom_rank") not in (None, "")
-            }
-        df_filtered["custom_rank"] = df_filtered["code"].map(custom_rank_map).fillna("")
+        df_filtered["custom_rank"] = df_filtered["code"].map(table_pins).fillna("")
         records = df_filtered.to_dict("records")
         resorted = _rank_sort(records, sort_by)
-        return resorted, excluded_occupations, validation_msg
+        return resorted, excluded_occupations, table_pins, sort_by, validation_msg
 
     @app.callback(
         Output("map-level", "value"),
@@ -1746,6 +2007,408 @@ def _empty_figure(message):
     )
     return fig
 
+MOBILE_INTERACTION_JS = r"""
+<script>
+(function () {
+  if (window.__h1bMobileControllerInstalled) return;
+  window.__h1bMobileControllerInstalled = true;
+
+  const LONG_PRESS_MS = 320;
+  const MOVE_CANCEL_PX = 28;
+  const MAP_IDS = ["state-hex-map", "compare-map-a", "compare-map-b", "compare-map-diff"];
+  const TOOLTIP_IDS = {
+    "state-hex-map": "mobile-tooltip-explore",
+    "compare-map-a": "mobile-tooltip-compare-a",
+    "compare-map-b": "mobile-tooltip-compare-b",
+    "compare-map-diff": "mobile-tooltip-compare-diff"
+  };
+  const fingerCount = {};
+  document.addEventListener("mouseleave", function (e) {
+    if (e.target && e.target.classList && e.target.classList.contains("js-plotly-plot")) {
+      const hoverlayer = e.target.querySelector(".hoverlayer");
+      if (hoverlayer) {
+        hoverlayer.style.display = "none";
+      }
+    }
+  }, true);
+
+  document.addEventListener("mouseenter", function (e) {
+    if (e.target && e.target.classList && e.target.classList.contains("js-plotly-plot")) {
+      const hoverlayer = e.target.querySelector(".hoverlayer");
+      if (hoverlayer) {
+        hoverlayer.style.display = "";
+      }
+    }
+  }, true);
+
+  function isMobileUI() {
+    return (window.matchMedia && (
+      window.matchMedia("(max-width: 767px)").matches ||
+      window.matchMedia("(pointer: coarse)").matches
+    )) || ("ontouchstart" in window);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function formatTooltipHtml(raw) {
+    if (!raw) return "";
+    let lines = String(raw).replace(/<\/?b>/gi, "").split(/<br\s*\/?>(?:\n)?/gi)
+      .map(l => l.replace(/<[^>]*>/g, "").trim())
+      .filter(Boolean)
+      .filter(l => !/^\(click to /i.test(l) && !/^\(hidden by/i.test(l));
+
+    if (!lines.length) return "";
+    if (/^\d{3,5}$/.test(lines[0]) && lines.length === 1) {
+      lines = ["County " + lines[0], "No wage data for this area"];
+    }
+    return '<div class="tt-title">' + escapeHtml(lines[0]) + "</div>"
+      + (lines.length > 1 ? '<div class="tt-body">' + lines.slice(1).map(escapeHtml).join("<br>") + "</div>" : "");
+  }
+
+  function showTooltip(graphId, raw) {
+    Object.keys(TOOLTIP_IDS).forEach(function (gid) {
+      const el = document.getElementById(TOOLTIP_IDS[gid]);
+      if (!el) return;
+      if (gid === graphId && raw) {
+        const html = formatTooltipHtml(raw);
+        el.innerHTML = html;
+        el.classList.toggle("is-active", !!html);
+      } else {
+        el.innerHTML = "";
+        el.classList.remove("is-active");
+      }
+    });
+  }
+
+  function keepTooltip(graphId) {
+    const el = document.getElementById(TOOLTIP_IDS[graphId]);
+    if (el && el.innerHTML) el.classList.add("is-active");
+  }
+
+  function plotlyGd(id) {
+    const el = document.getElementById(id);
+    return el && (el.classList.contains("js-plotly-plot") ? el : el.querySelector(".js-plotly-plot"));
+  }
+
+  function getMapboxMap(gd) {
+    if (!gd || !gd._fullLayout) return null;
+    const mb = gd._fullLayout.mapbox || gd._fullLayout.map;
+    return mb ? (mb._subplot && mb._subplot.map) || mb._map || mb.map : null;
+  }
+
+  function normalizeFips(fid) {
+    const s = String(fid || "").trim();
+    return (/^\d+$/.test(s) && s.length < 5) ? s.padStart(5, "0") : s;
+  }
+
+  function hoverLookup(gd) {
+    if (!gd) return {};
+    if (gd.__h1bHoverIdx) return gd.__h1bHoverIdx;
+
+    const idx = {};
+    const meta = (gd._fullLayout && gd._fullLayout.meta) || {};
+    const hoverById = meta.hover_by_id || {};
+    Object.keys(hoverById).forEach(function (k) {
+      const val = hoverById[k];
+      idx[k] = val;
+      idx[normalizeFips(k)] = val;
+    });
+
+    (gd.data || []).forEach(function (t) {
+      const locs = t.locations || [], texts = t.text || t.hovertext || [], cds = t.customdata || [];
+      const maxLen = Math.max(locs.length, cds.length, Array.isArray(texts) ? texts.length : 0);
+      for (let j = 0; j < maxLen; j++) {
+        let tx = Array.isArray(texts) ? texts[j] : texts;
+        let loc = locs[j];
+        const cd = cds[j];
+        if (Array.isArray(cd)) {
+          if (cd[1]) tx = cd[1];
+          if (cd[0] != null) loc = cd[0];
+        }
+        if (loc != null && tx) {
+          const s = String(loc);
+          idx[s] = String(tx);
+          idx[normalizeFips(s)] = String(tx);
+        }
+      }
+    });
+
+    gd.__h1bHoverIdx = idx;
+    return idx;
+  }
+
+  function lookupText(gd, fid) {
+    const idx = hoverLookup(gd);
+    return idx[normalizeFips(fid)] || idx[String(fid).trim()] || null;
+  }
+
+  function hitTestHex(gd, clientX, clientY) {
+    if (!gd || !gd._fullData || !gd._fullLayout) return null;
+    const rect = gd.getBoundingClientRect();
+    const xa = gd._fullLayout.xaxis, ya = gd._fullLayout.yaxis;
+    if (!xa || !ya || !xa.range || !ya.range || !xa._length || !ya._length) return null;
+    const px = clientX - rect.left, py = clientY - rect.top;
+    const xMin = Number(xa.range[0]), xMax = Number(xa.range[1]);
+    const yMin = Number(ya.range[0]), yMax = Number(ya.range[1]);
+    const xOffset = Number(xa._offset || 0), yOffset = Number(ya._offset || 0);
+    const xLen = Number(xa._length), yLen = Number(ya._length);
+    const dataX = xMin + ((px - xOffset) / xLen) * (xMax - xMin);
+    const dataY = yMax - ((py - yOffset) / yLen) * (yMax - yMin);
+    if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return null;
+
+    let best = null, bestDist = Infinity;
+    gd._fullData.forEach(function (t) {
+      if (!t || !t.customdata || !t.x || !t.y || !t.x.length || !t.y.length || !t.mode || t.mode.indexOf("markers") < 0) return;
+      for (let i = 0; i < Math.min(t.x.length, t.y.length, t.customdata.length); i++) {
+        const cx = Number(t.x[i]), cy = Number(t.y[i]);
+        if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+        const dist = Math.hypot(cx - dataX, cy - dataY);
+        if (dist < bestDist) {
+          const cd = t.customdata[i];
+          if (Array.isArray(cd) && cd[0] != null && cd[1]) {
+            bestDist = dist;
+            best = { id: String(cd[0]), text: String(cd[1]) };
+          }
+        }
+      }
+    });
+    return bestDist <= 0.9 ? best : null;
+  }
+
+  function hitTestMapbox(gd, clientX, clientY) {
+    const map = getMapboxMap(gd);
+    if (!map || !map.queryRenderedFeatures) return null;
+    const rect = (gd.querySelector(".mapboxgl-canvas, .maplibregl-canvas") || gd).getBoundingClientRect();
+    const x = clientX - rect.left, y = clientY - rect.top;
+
+    const layerIds = (map.getStyle()?.layers || [])
+      .map(l => l.id)
+      .filter(id => /choropleth|plotly|fill/i.test(id));
+
+    const features = map.queryRenderedFeatures([x, y], layerIds.length ? { layers: layerIds } : undefined) || [];
+
+    for (const f of features) {
+      const p = f.properties || {};
+      const candidates = [];
+      if (f.id != null) candidates.push(f.id);
+      if (p.fips != null) candidates.push(p.fips);
+      if (p.GEOID != null) candidates.push(p.GEOID);
+      if (p.STATEFP != null && p.COUNTYFP != null) {
+        candidates.push(String(p.STATEFP).padStart(2, "0") + String(p.COUNTYFP).padStart(3, "0"));
+      }
+
+      for (const fid of candidates) {
+        if (fid) {
+          const text = lookupText(gd, fid);
+          if (text) return { id: normalizeFips(fid), text: text };
+        }
+      }
+
+      const name = p.name || p.NAME || p.NAMELSAD;
+      if (name) {
+        const fid2 = candidates[0] != null ? normalizeFips(candidates[0]) : "";
+        return { id: fid2, text: "<b>" + name + "</b><br>No wage data for this area" };
+      }
+    }
+    return null;
+  }
+
+  function hitTest(gd, clientX, clientY) {
+    return getMapboxMap(gd) ? hitTestMapbox(gd, clientX, clientY) : hitTestHex(gd, clientX, clientY);
+  }
+
+  function configureMapboxGestures(gd, graphId) {
+    const map = getMapboxMap(gd);
+    if (!map) return;
+    const key = graphId || "map";
+
+    if (map.touchZoomRotate) {
+      map.touchZoomRotate.enable();
+      map.touchZoomRotate.disableRotation?.();
+    }
+
+    if (map.dragPan) {
+      const two = (fingerCount[key] || 0) >= 2;
+      two ? map.dragPan.enable() : map.dragPan.disable();
+    }
+
+    if (map.__h1bBound) return;
+    map.__h1bBound = true;
+
+    const canvas = map.getCanvas?.() || map.getContainer?.();
+    if (!canvas) return;
+
+    function sync(e) {
+      fingerCount[key] = e?.touches?.length || 0;
+      if (map.dragPan) {
+        fingerCount[key] >= 2 ? map.dragPan.enable() : map.dragPan.disable();
+      }
+    }
+
+    canvas.addEventListener("touchstart", sync, { passive: true, capture: true });
+    canvas.addEventListener("touchmove", sync, { passive: true, capture: true });
+    canvas.addEventListener("touchend", sync, { passive: true, capture: true });
+    canvas.addEventListener("touchcancel", function () {
+      fingerCount[key] = 0;
+      map.dragPan?.disable();
+    }, { passive: true, capture: true });
+  }
+
+  function bindTouchEvents(root, graphId) {
+    let state = "NORMAL", lpTimer = null, suppressClickUntil = 0;
+    let startX = 0, startY = 0, lastFeature = null;
+    let fingerDown = false, longPressFired = false, multiTouch = false;
+
+    const clearLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+
+    function beginInspect(x, y) {
+      longPressFired = true;
+      state = "INSPECTING";
+      const gd = plotlyGd(graphId);
+      configureMapboxGestures(gd, graphId);
+      const feat = hitTest(gd, x, y);
+      if (feat) {
+        lastFeature = feat;
+        showTooltip(graphId, feat.text);
+      }
+    }
+
+    root.addEventListener("touchstart", function (e) {
+      if (!isMobileUI()) return;
+      if (e.touches.length > 1) {
+        multiTouch = true;
+        clearLP();
+        getMapboxMap(plotlyGd(graphId))?.dragPan?.enable();
+        return;
+      }
+      multiTouch = false;
+      fingerDown = true;
+      longPressFired = false;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      clearLP();
+      lpTimer = setTimeout(() => {
+        lpTimer = null;
+        if (fingerDown && !multiTouch) beginInspect(startX, startY);
+      }, LONG_PRESS_MS);
+    }, { passive: true, capture: true });
+
+    root.addEventListener("touchmove", function (e) {
+      if (!isMobileUI()) return;
+      if (e.touches.length > 1) { multiTouch = true; clearLP(); return; }
+      if (!fingerDown) return;
+
+      const t = e.touches[0];
+      const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
+      if (state !== "INSPECTING") {
+        if (dist > MOVE_CANCEL_PX) clearLP();
+        return;
+      }
+      if (e.cancelable) e.preventDefault();
+      const feat = hitTest(plotlyGd(graphId), t.clientX, t.clientY);
+      if (feat && (!lastFeature || feat.id !== lastFeature.id)) {
+        lastFeature = feat;
+        showTooltip(graphId, feat.text);
+      }
+    }, { passive: false, capture: true });
+
+    root.addEventListener("touchend", function (e) {
+      if (!isMobileUI()) return;
+      clearLP();
+      if (multiTouch) {
+        multiTouch = !!e.touches?.length;
+        if (!multiTouch) {
+          fingerDown = false;
+          longPressFired = false;
+          getMapboxMap(plotlyGd(graphId))?.dragPan?.disable();
+        }
+        return;
+      }
+      if (!fingerDown) return;
+      fingerDown = false;
+      if (longPressFired || state === "INSPECTING") {
+        state = "TOOLTIP_FROZEN";
+        keepTooltip(graphId);
+        longPressFired = false;
+        suppressClickUntil = Date.now() + 400;
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (state !== "TOOLTIP_FROZEN") state = "NORMAL";
+    }, { passive: false, capture: true });
+
+    root.addEventListener("touchcancel", function () {
+      clearLP();
+      fingerDown = false;
+      longPressFired = false;
+      multiTouch = false;
+      if (state === "INSPECTING") {
+        state = "TOOLTIP_FROZEN";
+        keepTooltip(graphId);
+      }
+    }, { passive: true, capture: true });
+
+    root.addEventListener("click", function (e) {
+      if (isMobileUI() && Date.now() < suppressClickUntil) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }, true);
+
+    root.addEventListener("contextmenu", function (e) {
+      if (isMobileUI()) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+  }
+
+  function attachController(graphId) {
+    const root = document.getElementById(graphId);
+    if (!root) return;
+
+    if (!root.__h1bTouchBound) {
+      root.__h1bTouchBound = true;
+      root.style.touchAction = "none";
+      bindTouchEvents(root, graphId);
+    }
+
+    const gd = plotlyGd(graphId);
+    if (gd && !gd.__h1bAfterplotBound) {
+      gd.__h1bAfterplotBound = true;
+      gd.on("plotly_afterplot", function () {
+        gd.__h1bHoverIdx = null;
+        configureMapboxGestures(gd, graphId);
+        showTooltip(graphId, null);
+      });
+      configureMapboxGestures(gd, graphId);
+    }
+  }
+
+  function scan() {
+    if (isMobileUI()) MAP_IDS.forEach(attachController);
+  }
+
+  function boot() {
+    scan();
+    new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+    let n = 0;
+    const iv = setInterval(function () {
+      scan();
+      if (++n >= 20) clearInterval(iv);
+    }, 500);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();
+</script>
+"""
+
+
 def create_app(data_dir=None):
     global DATA
     files = resolve_files(data_dir or DATA_DIR)
@@ -1753,11 +2416,27 @@ def create_app(data_dir=None):
     app = dash.Dash(__name__, suppress_callback_exceptions=True)
     app.title = "H-1B Strategic Wage Map"
     app.layout = build_layout()
-    app.index_string = app.index_string.replace("</head>", f"<style>{APP_CSS}</style></head>")
+    app.index_string = app.index_string.replace(
+        "</head>",
+        f"<style>{APP_CSS}</style></head>"
+    ).replace(
+        "</body>",
+        f"{MOBILE_INTERACTION_JS}</body>"
+    )
+    get_county_geojson(None)
+    _geojson_http_cache = {}
+
     @app.server.route("/assets/counties_10m.json")
     def serve_counties_geojson():
         state_filter = flask.request.args.get("state")
-        return flask.jsonify(get_county_geojson(state_filter))
+        key = (state_filter or "").upper()
+        body = _geojson_http_cache.get(key)
+        if body is None:
+            body = json.dumps(get_county_geojson(state_filter), separators=(",", ":"))
+            _geojson_http_cache[key] = body
+        resp = flask.Response(body, mimetype="application/json")
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
     register_callbacks(app)
     return app
 
