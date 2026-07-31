@@ -429,9 +429,11 @@ def add_hex_trace(fig, state, fill_color, border_color, hover_text, clickable=Tr
         fillcolor=fill_color, line=dict(color=border_color, width=1.2),
         hoverinfo="skip", showlegend=False
     ))
+    is_mobile = is_mobile_request()
+    label_size = 9 if is_mobile else 12
     fig.add_trace(go.Scatter(
         x=[cx], y=[cy], mode="text", text=[state],
-        textfont=dict(size=13, color=LABEL_COLOR, family="Arial, sans-serif"),
+        textfont=dict(size=label_size, color=LABEL_COLOR, family="Arial, sans-serif"),
         hoverinfo="skip", showlegend=False
     ))
     if clickable:
@@ -480,18 +482,47 @@ def build_legend_html():
         ]
     ])
 
+def build_explore_legend_html():
+    return html.Div(className="explore-legend-wrapper", children=[
+        html.Div("Triggerable level", className="explore-legend-title"),
+        html.Div(className="explore-legend-row-container", children=[
+            html.Div(className="explore-legend-item", children=[
+                html.Span(className="explore-legend-swatch", style={"backgroundColor": color, "borderColor": border}),
+                html.Span(label, className="explore-legend-label")
+            ])
+            for label, color, border in LEGEND_ITEMS
+        ])
+    ])
+
+def is_mobile_request():
+    try:
+        if not flask.has_request_context():
+            return False
+        headers = flask.request.headers
+        if "?1" in headers.get("Sec-Ch-Ua-Mobile", ""):
+            return True
+        user_agent = headers.get("User-Agent", "").lower()
+        mobile_keywords = ["android", "webos", "iphone", "ipad", "ipod", "blackberry", "iemobile", "opera mini", "mobile", "mobi"]
+        return any(kw in user_agent for kw in mobile_keywords)
+    except Exception:
+        return False
+
 def _finalize_hex_figure(fig, height=560, margin=None, title=None, show_legend=False, layout_id=""):
-    fig.update_xaxes(visible=False, showgrid=False, zeroline=False, fixedrange=True)
-    fig.update_yaxes(visible=False, showgrid=False, zeroline=False,
-                       scaleanchor="x", scaleratio=1, fixedrange=True)
+    fig.update_xaxes(range=[-0.1, 12.1], visible=False, showgrid=False, zeroline=False, fixedrange=True)
+    fig.update_yaxes(range=[-7.4, 0.6], visible=False, showgrid=False, zeroline=False, scaleanchor="x", scaleratio=1, fixedrange=True)
+    title_layout = None
+    if title:
+        if isinstance(title, dict):
+            title_layout = title
+        else:
+            title_layout = dict(text=title)
     layout = dict(
         margin=margin or {"r": 140 if show_legend else 20, "t": 30 if title else 10, "l": 10, "b": 10},
         clickmode="event", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         height=height, showlegend=show_legend,
-        dragmode=False
+        dragmode=False,
+        title=title_layout
     )
-    if title:
-        layout["title"] = title
     fig.update_layout(**layout)
     return fig
 
@@ -519,7 +550,16 @@ def build_state_hex_figure(state_levels, salary, excluded_states, allowed_bucket
         add_hex_trace(fig, state, fill_color, border, hover)
     if show_legend:
         add_bucket_legend(fig)
-    return _finalize_hex_figure(fig, show_legend=show_legend, layout_id=map_id)
+    is_mobile = is_mobile_request()
+    if is_mobile:
+        margin = {"r": 5, "t": 10, "l": 5, "b": 5}
+    else:
+        margin = {"r": 10, "t": 10, "l": 10, "b": 10} if map_id in ("compare-map-a", "compare-map-b") else None
+    if is_mobile:
+        height = 240 if map_id in ("compare-map-a", "compare-map-b") else 240
+    else:
+        height = 380 if map_id in ("compare-map-a", "compare-map-b") else 560
+    return _finalize_hex_figure(fig, height=height, margin=margin, show_legend=show_legend, layout_id=map_id)
 
 DIVERGING_BLUE = (33, 102, 172)
 DIVERGING_WHITE = (230, 230, 230)
@@ -562,6 +602,30 @@ def build_diff_hex_figure(state_levels_a, state_levels_b, label_a, label_b, excl
             hover = f"<b>{state}</b><br>{label_a}: {bucket_a}<br>{label_b}: {bucket_b}<br>{verdict}"
         hover += "<br><i>(click to " + ("re-enable" if is_excluded else "exclude") + ")</i>"
         add_hex_trace(fig, state, fill_color, border, hover)
+    is_mobile = is_mobile_request()
+    if is_mobile:
+        colorbar_config = dict(
+            orientation="h",
+            y=-0.12,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            thickness=10,
+            len=0.8,
+            tickfont=dict(size=8),
+            tickvals=[0, 0.5, 1],
+            ticktext=[f"{label_a[:15]} higher", "Same", f"{label_b[:15]} higher"]
+        )
+        margin_config = {"r": 5, "t": 10, "l": 5, "b": 50}
+        height = 240
+    else:
+        colorbar_config = dict(
+            x=1.02, xanchor="left", len=0.8,
+            tickvals=[0, 0.5, 1],
+            ticktext=[f"{label_a} higher", "Same level", f"{label_b} higher"]
+        )
+        margin_config = {"r": 160, "t": 10, "l": 10, "b": 10}
+        height = 380
     fig.add_trace(go.Scatter(
         x=[None], y=[None], mode="markers", showlegend=False,
         marker=dict(
@@ -570,14 +634,10 @@ def build_diff_hex_figure(state_levels_a, state_levels_b, label_a, label_b, excl
                          [0.5, "rgb(%d,%d,%d)" % DIVERGING_WHITE],
                          [1, "rgb(%d,%d,%d)" % DIVERGING_RED]],
             cmin=0, cmax=1, showscale=True,
-            colorbar=dict(
-                x=1.02, xanchor="left", len=0.8,
-                tickvals=[0, 0.5, 1],
-                ticktext=[f"{label_a} higher", "Same level", f"{label_b} higher"]
-            )
+            colorbar=colorbar_config
         )
     ))
-    return _finalize_hex_figure(fig, height=480, margin={"r": 160, "t": 10, "l": 10, "b": 10}, title=None, show_legend=False, layout_id="compare-map-diff")
+    return _finalize_hex_figure(fig, height=height, margin=margin_config, title=None, show_legend=False, layout_id="compare-map-diff")
 
 def get_county_centroid(fips, county_geojson):
     if not county_geojson or "features" not in county_geojson:
@@ -604,13 +664,18 @@ def get_county_centroid(fips, county_geojson):
     return None
 
 def _get_map_center_and_zoom(state_filter=None, county_filter=None):
-    lat, lon, zoom = 37.0902, -95.7129, 3
+    is_mobile = is_mobile_request()
+    default_zoom = 1.9 if is_mobile else 3.0
+    lat, lon, zoom = 37.0902, -95.7129, default_zoom
     if county_filter:
         centroid = get_county_centroid(county_filter, DATA.county_geojson)
         if centroid:
-            return centroid[0], centroid[1], 8.5
+            c_zoom = 7.5 if is_mobile else 8.5
+            return centroid[0], centroid[1], c_zoom
     if state_filter and state_filter in STATE_CENTERS:
-        return STATE_CENTERS[state_filter]
+        center_data = STATE_CENTERS[state_filter]
+        state_zoom = max(1.5, center_data[2] - 1.0) if is_mobile else center_data[2]
+        return center_data[0], center_data[1], state_zoom
     return lat, lon, zoom
 
 def build_county_choropleth_figure(county_geojson, county_levels, salary, allowed_buckets, state_filter=None, show_legend=True, excluded_states=None, excluded_counties=None, map_id="", county_filter=None):
@@ -685,6 +750,11 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
     ))
     lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
     uirevision_val = str(state_filter) + ("_" + str(county_filter) if county_filter else "")
+    is_mobile = is_mobile_request()
+    if is_mobile:
+        height = 240 if map_id in ("compare-map-a", "compare-map-b") else 240
+    else:
+        height = 380 if map_id in ("compare-map-a", "compare-map-b") else 560
     fig.update_layout(
         mapbox=dict(
             style="carto-positron",
@@ -692,7 +762,11 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
             zoom=zoom
         ),
         uirevision=uirevision_val,
-        margin={"r": 160 if show_legend else 20, "t": 10, "l": 0, "b": 0}, height=560
+        margin=(
+            {"r": 10, "t": 10, "l": 10, "b": 0} if map_id in ("compare-map-a", "compare-map-b")
+            else {"r": 90 if show_legend else 20, "t": 10, "l": 0, "b": 0}
+        ),
+        height=height
     )
     return fig
 
@@ -751,6 +825,30 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
     for i, color in enumerate(band_colors):
         colorscale.append([i / n, color])
         colorscale.append([(i + 1) / n, color])
+    is_mobile = is_mobile_request()
+    if is_mobile:
+        colorbar_config = dict(
+            orientation="h",
+            y=-0.1,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            thickness=10,
+            len=0.8,
+            tickfont=dict(size=8),
+            tickvals=[-6, -5, -4, -2, 0, 2, 4],
+            ticktext=["No data", "Excluded", "B higher", "", "Same", "", "A higher"]
+        )
+        margin_config = {"r": 10, "t": 10, "l": 10, "b": 50}
+        height = 240
+    else:
+        colorbar_config = dict(
+            title="Level difference", x=1.02, xanchor="left",
+            tickvals=[-6, -5, -4, -2, 0, 2, 4],
+            ticktext=["No data", "Excluded", f"{label_b} higher", "", "Same", "", f"{label_a} higher"]
+        )
+        margin_config = {"r": 160, "t": 10, "l": 0, "b": 0}
+        height = 380
     fig = go.Figure(go.Choroplethmapbox(
         geojson=county_geojson, locations=locations, z=z,
         featureidkey="id", colorscale=colorscale, zmin=-6, zmax=4,
@@ -758,11 +856,7 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
         text=hover_text, hoverinfo="text",
         showscale=True,
         customdata=locations,
-        colorbar=dict(
-            title="Level difference", x=1.02, xanchor="left",
-            tickvals=[-6, -5, -4, -2, 0, 2, 4],
-            ticktext=["No data", "Excluded", f"{label_b} higher", "", "Same", "", f"{label_a} higher"]
-        )
+        colorbar=colorbar_config
     ))
     lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
     uirevision_val = str(state_filter) + ("_" + str(county_filter) if county_filter else "")
@@ -773,7 +867,7 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
             zoom=zoom
         ),
         uirevision=uirevision_val,
-        margin={"r": 160, "t": 10, "l": 0, "b": 0}, height=560
+        margin=margin_config, height=height
     )
     return fig
 
@@ -944,7 +1038,8 @@ def build_layout():
         make_controls(),
         html.Div(id="view-explore", children=[
             html.Div(className="map-panel", children=[
-                dcc.Graph(id="state-hex-map", config={"displayModeBar": False, "scrollZoom": True})
+                dcc.Graph(id="state-hex-map", responsive=True, config={"displayModeBar": False, "scrollZoom": True}),
+                build_explore_legend_html()
             ])
         ]),
         html.Div(id="view-compare", style={"display": "none"}, children=[
@@ -1032,7 +1127,23 @@ APP_CSS = """
 .control-block { flex: 1 1 220px; min-width: 200px; }
 .control-block label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
 .salary-field { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
-.map-panel { border: 1px solid #e2e2e6; border-radius: 10px; padding: 8px; }
+
+.map-panel {
+    border: 1px solid #e2e2e6;
+    border-radius: 10px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    clear: both;
+}
+
+#state-hex-map {
+    width: 100% !important;
+    height: 560px !important;
+    margin-bottom: 16px !important;
+}
+
 .hint-text { color: #777; font-size: 12px; text-align: center; margin: 4px 0 0; }
 .compare-controls { display: flex; gap: 24px; margin-bottom: 8px; }
 .compare-controls > div { flex: 1; }
@@ -1044,12 +1155,23 @@ APP_CSS = """
     min-width: 0 !important;
     height: 380px !important;
 }
+
 .compare-maps .js-plotly-plot,
 .compare-maps .plotly {
     width: 100% !important;
     max-width: 100% !important;
     height: 100% !important;
 }
+
+.map-legend { display: flex; flex-direction: column; gap: 6px; padding: 12px;
+    border: 1px solid #e2e2e6; border-radius: 8px; background: #fafafa; }
+.legend-title { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+.legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #333; }
+.legend-swatch { width: 14px; height: 14px; border: 1px solid #999; border-radius: 2px;
+    display: inline-block; flex: 0 0 14px; }
+.rank-controls { margin-bottom: 16px; }
+.validation-error { color: #d9534f; font-weight: bold; margin-bottom: 8px; font-size: 13px; }
+
 .compare-diff-title {
     font-weight: bold;
     font-size: 16px;
@@ -1059,14 +1181,51 @@ APP_CSS = """
     color: #2b2b2b;
     width: 100%;
 }
-.map-legend { display: flex; flex-direction: column; gap: 6px; padding: 12px;
-    border: 1px solid #e2e2e6; border-radius: 8px; background: #fafafa; }
-.legend-title { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
-.legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #333; }
-.legend-swatch { width: 14px; height: 14px; border: 1px solid #999; border-radius: 2px;
-    display: inline-block; flex: 0 0 14px; }
-.rank-controls { margin-bottom: 16px; }
-.validation-error { color: #d9534f; font-weight: bold; margin-bottom: 8px; font-size: 13px; }
+
+.explore-legend-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid #e2e2e6;
+    border-radius: 8px;
+    background: #fafafa;
+    margin-top: 16px;
+    width: 100%;
+    box-sizing: border-box;
+}
+.explore-legend-title {
+    font-weight: 600;
+    font-size: 13px;
+    text-align: center;
+    width: 100%;
+    border-bottom: 1px solid #eaeaea;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+.explore-legend-row-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 16px;
+    width: 100%;
+}
+.explore-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #333;
+}
+.explore-legend-swatch {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #999;
+    border-radius: 2px;
+    display: inline-block;
+    flex: 0 0 14px;
+}
 
 .js-plotly-plot .mapboxgl-canvas {
     cursor: grab !important;
@@ -1082,13 +1241,107 @@ APP_CSS = """
     cursor: pointer !important;
 }
 
-.js-plotly-plot .plotly {
-    transform: none !important;
-}
-
 .js-plotly-plot .plotly .hoverlayer {
     transform: translate(12px, -4px) !important;
     pointer-events: none !important;
+}
+
+@media (max-width: 767px) {
+    .compare-diff-title {
+        font-size: 13px;
+        margin-top: 16px;
+        margin-bottom: 4px;
+    }
+    .app-shell {
+        padding: 8px !important;
+    }
+    .controls-panel {
+        flex-direction: column !important;
+        gap: 12px !important;
+        padding: 12px !important;
+    }
+    .control-block {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .compare-controls {
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+    .compare-maps {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 12px !important;
+    }
+    .compare-maps > div:not(.compare-legend-col) {
+        flex: none !important;
+        width: 100% !important;
+        height: 240px !important;
+    }
+    .compare-legend-col {
+        flex: none !important;
+        width: 100% !important;
+        margin: 8px 0 !important;
+        order: 2 !important;
+        height: auto !important;
+    }
+    .compare-maps > div:nth-child(1) {
+        order: 1 !important;
+    }
+    .compare-maps > div:nth-child(3) {
+        order: 3 !important;
+    }
+    .map-legend {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        flex-direction: row !important;
+        justify-content: center !important;
+        gap: 10px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 8px !important;
+        box-sizing: border-box !important;
+    }
+    .legend-title {
+        flex: 0 0 100% !important;
+        font-size: 10px !important;
+        margin-bottom: 2px !important;
+        text-align: center !important;
+        border-bottom: 1px solid #eaeaea !important;
+        padding-bottom: 4px !important;
+    }
+    .legend-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        font-size: 9px !important;
+    }
+    .legend-swatch {
+        width: 10px !important;
+        height: 10px !important;
+        flex: 0 0 10px !important;
+    }
+    #state-hex-map {
+        height: 240px !important;
+        width: 100% !important;
+        margin-bottom: 8px !important;
+    }
+    #compare-map-diff {
+        flex: none !important;
+        width: 100% !important;
+        height: 350px !important;
+        margin-top: 10px !important;
+    }
+    .rank-table-container {
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .rank-table-container .dash-spreadsheet-container .dash-spreadsheet {
+        min-width: 650px !important;
+    }
 }
 """
 
@@ -1228,10 +1481,11 @@ def register_callbacks(app: dash.Dash):
             geojson_url = "/assets/counties_10m.json" if not inspect_state else f"/assets/counties_10m.json?state={inspect_state}"
             return build_county_choropleth_figure(
                 geojson_url, county_levels, salary_val, buckets, 
-                state_filter=inspect_state, excluded_states=excluded, excluded_counties=excluded_counties, map_id="state-hex-map", county_filter=inspect_county
+                state_filter=inspect_state, excluded_states=excluded, excluded_counties=excluded_counties, map_id="state-hex-map", county_filter=inspect_county,
+                show_legend=False
             )
         state_levels = DATA.state_levels_for(occ_codes, combine_mode, salary_val)
-        return build_state_hex_figure(state_levels, salary_val, excluded, buckets, map_id="state-hex-map")
+        return build_state_hex_figure(state_levels, salary_val, excluded, buckets, show_legend=False, map_id="state-hex-map")
 
     @app.callback(
         Output("compare-map-a", "figure"), Output("compare-map-b", "figure"),
