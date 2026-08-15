@@ -1,0 +1,442 @@
+.app-shell { font-family: Arial, sans-serif; max-width: 1500px; margin: 0 auto; padding: 16px 16px; }
+.app-header h1 { margin-bottom: 4px; }
+.app-header p { color: #555; margin-top: 0; }
+.controls-scale-wrap {
+    width: 100%;
+    overflow: visible;
+    margin-bottom: 16px;
+    position: relative;
+    z-index: 10000;
+}
+.controls-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: #f7f7f9;
+    box-sizing: border-box;
+    border: 1px solid #e2e2e6;
+    border-radius: 10px;
+    padding: 16px;
+    width: 1460px;
+    max-width: none;
+    transform-origin: top left;
+    position: relative;
+    z-index: 10000;
+    font-size: 15px;
+    overflow: visible;
+}
+.controls-row.row-1,
+.controls-row.row-2 {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 12px;
+    width: 100%;
+    align-items: flex-start;
+}
+.controls-row.row-1 > .control-block { flex: 1 1 0; min-width: 0; }
+.controls-row.row-2 > .control-block:nth-child(1) { flex: 0 0 320px; }
+.controls-row.row-2 > .control-block:nth-child(2) { flex: 0 0 420px; }
+.controls-row.row-2 > .control-block:nth-child(3) { flex: 1 1 0; min-width: 0; }
+.control-block { box-sizing: border-box; }
+.control-block label {
+    font-weight: 600;
+    font-size: 15px;
+    display: block;
+    margin-bottom: 6px;
+}
+.salary-field {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 15px;
+}
+.inspect-row { display: flex; flex-wrap: nowrap; gap: 10px; min-width: 0; }
+.inspect-field { flex: 1 1 0; min-width: 0; }
+.inspect-reset-row { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 6px; }
+.inspect-reset-btn {
+    font-size: 12px;
+    padding: 3px 7px;
+    cursor: pointer;
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.25;
+}
+.dash-dropdown, .Select { position: relative; z-index: 50; }
+.Select-control { position: relative; z-index: 1; }
+.Select.is-open, .Select--is-open { z-index: 10050 !important; }
+.Select-menu-outer, .dash-dropdown .Select-menu-outer, .Select-menu {
+    z-index: 10060 !important;
+    background: #fff !important;
+}
+.map-panel, .compare-maps { position: relative; z-index: 1; }
+.js-plotly-plot .hoverlayer,
+.js-plotly-plot .plotly .hoverlayer {
+    z-index: 1000 !important;
+    pointer-events: none !important;
+}
+.js-plotly-plot .mapboxgl-canvas,
+.js-plotly-plot .maplibregl-canvas {
+    z-index: 0 !important;
+}
+
+.map-panel {
+    border: 1px solid #e2e2e6;
+    border-radius: 10px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    clear: both;
+}
+
+#state-hex-map {
+    width: 100% !important;
+    height: 560px !important;
+    margin-bottom: 16px !important;
+}
+
+#compare-map-diff {
+    width: 100% !important;
+    height: 500px !important;
+    margin-bottom: 32px !important;
+}
+
+.hint-text { color: #777; font-size: 12px; text-align: center; margin: 4px 0 0; }
+.compare-controls { display: flex; gap: 24px; margin-bottom: 8px; }
+.compare-controls > div { flex: 1; }
+.compare-maps { display: flex; align-items: center; justify-content: space-between !important; width: 100% !important; box-sizing: border-box !important; }
+.compare-legend-col { flex: 0 0 150px !important; display: flex !important; align-items: center !important; justify-content: center !important; height: 400px !important; }
+.compare-maps > div:not(.compare-legend-col) {
+    width: calc(50% - 75px) !important;
+    flex: 0 0 calc(50% - 75px) !important;
+    min-width: 0 !important;
+    height: 400px !important;
+}
+
+.compare-maps .js-plotly-plot,
+.compare-maps .plotly {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+}
+
+.map-legend { display: flex; flex-direction: column; gap: 6px; padding: 12px;
+    border: 1px solid #e2e2e6; border-radius: 8px; background: #fafafa; }
+.legend-title { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+.legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #333; }
+.legend-swatch { width: 14px; height: 14px; border: 1px solid #999; border-radius: 2px;
+    display: inline-block; flex: 0 0 14px; }
+.rank-controls { margin-bottom: 16px; }
+.validation-error { color: #d9534f; font-weight: bold; margin-bottom: 8px; font-size: 13px; }
+
+.compare-diff-title {
+    font-weight: bold;
+    font-size: 16px;
+    text-align: center;
+    margin-top: 24px;
+    margin-bottom: 8px;
+    color: #2b2b2b;
+    width: 100%;
+}
+
+.explore-legend-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid #e2e2e6;
+    border-radius: 8px;
+    background: #fafafa;
+    margin-top: 16px;
+    width: 100%;
+    box-sizing: border-box;
+}
+.explore-legend-title {
+    font-weight: 600;
+    font-size: 13px;
+    text-align: center;
+    width: 100%;
+    border-bottom: 1px solid #eaeaea;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+.explore-legend-row-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 16px;
+    width: 100%;
+}
+.explore-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #333;
+}
+.explore-legend-swatch {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #999;
+    border-radius: 2px;
+    display: inline-block;
+    flex: 0 0 14px;
+}
+
+.js-plotly-plot .mapboxgl-canvas,
+.js-plotly-plot .maplibregl-canvas {
+    cursor: grab !important;
+}
+.js-plotly-plot .mapboxgl-canvas:active,
+.js-plotly-plot .maplibregl-canvas:active {
+    cursor: grabbing !important;
+}
+
+.js-plotly-plot:has(.hovertext) .nsewdrag {
+    cursor: pointer !important;
+}
+.js-plotly-plot:has(.hovertext) .mapboxgl-canvas,
+.js-plotly-plot:has(.hovertext) .maplibregl-canvas {
+    cursor: pointer !important;
+}
+
+.js-plotly-plot .plotly .hoverlayer {
+    pointer-events: none !important;
+}
+
+.phone-help {
+    display: none;
+}
+.mobile-tooltip {
+    display: none;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    height: 0;
+    overflow: hidden;
+}
+.mobile-tooltip.is-active {
+    display: block;
+    height: auto;
+    margin: 10px 0 8px 0;
+    padding: 8px 10px;
+    background: #f7f7f9;
+    color: #2b2b2b;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    word-break: break-word;
+}
+.mobile-tooltip .tt-title {
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+.mobile-tooltip .tt-body {
+    color: #333;
+    font-size: 12px;
+}
+.mobile-tooltip .tt-hint {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #777;
+    font-style: italic;
+}
+
+@media (max-width: 767px) {
+    .phone-help {
+        display: block !important;
+        background: #f0f4f8;
+        border: 1px solid #d0d7de;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: #333;
+    }
+    .phone-help-title {
+        font-weight: 700;
+        font-size: 13px;
+        margin-bottom: 4px;
+    }
+    .phone-help ul {
+        margin: 0;
+        padding-left: 18px;
+    }
+    .phone-help li {
+        margin: 2px 0;
+    }
+    .mobile-tooltip:not(.is-active) {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+    .compare-map-slot {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        min-width: 0;
+    }
+    .compare-maps .compare-map-slot .js-plotly-plot,
+    .compare-maps .compare-map-slot .plotly {
+        width: 100% !important;
+        height: 240px !important;
+    }
+    .js-plotly-plot .hoverlayer,
+    .js-plotly-plot .hovertext {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
+    #state-hex-map,
+    #compare-map-a,
+    #compare-map-b,
+    #compare-map-diff,
+    #state-hex-map .js-plotly-plot,
+    #compare-map-a .js-plotly-plot,
+    #compare-map-b .js-plotly-plot,
+    #compare-map-diff .js-plotly-plot,
+    #state-hex-map .mapboxgl-canvas,
+    #compare-map-a .mapboxgl-canvas,
+    #compare-map-b .mapboxgl-canvas,
+    #compare-map-diff .mapboxgl-canvas,
+    #state-hex-map .maplibregl-canvas,
+    #compare-map-a .maplibregl-canvas,
+    #compare-map-b .maplibregl-canvas,
+    #compare-map-diff .maplibregl-canvas {
+        touch-action: none !important;
+    }
+    .compare-diff-title {
+        font-size: 13px;
+        margin-top: 16px;
+        margin-bottom: 4px;
+    }
+    .app-shell {
+        padding: 8px !important;
+    }
+    .controls-scale-wrap {
+        height: auto !important;
+        overflow: visible !important;
+    }
+    .controls-panel {
+        width: 100% !important;
+        transform: none !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        padding: 12px !important;
+        font-size: 13px !important;
+    }
+    .controls-row.row-1,
+    .controls-row.row-2 {
+        flex-direction: column !important;
+        flex-wrap: nowrap !important;
+        gap: 12px !important;
+    }
+    .controls-row.row-1 > .control-block,
+    .controls-row.row-2 > .control-block,
+    .control-block {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+    }
+    .controls-row.row-2 > .control-block:nth-child(1),
+    .controls-row.row-2 > .control-block:nth-child(2),
+    .controls-row.row-2 > .control-block:nth-child(3) {
+        flex: 1 1 100% !important;
+    }
+    .inspect-row { flex-direction: column !important; gap: 10px !important; }
+    .inspect-field { width: 100% !important; }
+    .compare-controls {
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+    .compare-maps {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 12px !important;
+    }
+    .compare-maps > div:not(.compare-legend-col) {
+        flex: none !important;
+        width: 100% !important;
+        height: auto !important;
+    }
+    .compare-map-slot {
+        height: auto !important;
+    }
+    .compare-legend-col {
+        flex: none !important;
+        width: 100% !important;
+        margin: 8px 0 !important;
+        order: 2 !important;
+        height: auto !important;
+    }
+    .compare-maps > div:nth-child(1) {
+        order: 1 !important;
+    }
+    .compare-maps > div:nth-child(3) {
+        order: 3 !important;
+    }
+    .map-legend {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        flex-direction: row !important;
+        justify-content: center !important;
+        gap: 10px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 8px !important;
+        box-sizing: border-box !important;
+    }
+    .legend-title {
+        flex: 0 0 100% !important;
+        font-size: 10px !important;
+        margin-bottom: 2px !important;
+        text-align: center !important;
+        border-bottom: 1px solid #eaeaea !important;
+        padding-bottom: 4px !important;
+    }
+    .legend-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        font-size: 9px !important;
+    }
+    .legend-swatch {
+        width: 10px !important;
+        height: 10px !important;
+        flex: 0 0 10px !important;
+    }
+    #state-hex-map {
+        height: 240px !important;
+        width: 100% !important;
+        margin-bottom: 8px !important;
+    }
+    #compare-map-diff {
+        flex: none !important;
+        width: 100% !important;
+        height: 350px !important;
+        margin-top: 10px !important;
+        margin-bottom: 16px !important;
+    }
+    .rank-table-container {
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .rank-table-container .dash-spreadsheet-container .dash-spreadsheet {
+        min-width: 650px !important;
+    }
+}
