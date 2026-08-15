@@ -715,7 +715,7 @@ def _get_map_center_and_zoom(state_filter=None, county_filter=None):
         return center_data[0], center_data[1], state_zoom
     return lat, lon, zoom
 
-def build_county_choropleth_figure(county_geojson, county_levels, salary, allowed_buckets, state_filter=None, show_legend=True, excluded_states=None, excluded_counties=None, map_id="", county_filter=None):
+def build_county_choropleth_figure(county_geojson, county_levels, salary, allowed_buckets, state_filter=None, show_legend=True, excluded_states=None, excluded_counties=None, map_id="", county_filter=None, uirevision_val=None):
     sub = county_levels.copy()
     if state_filter:
         sub = sub[sub["state"] == state_filter]
@@ -796,7 +796,8 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
         ) if show_legend else None
     ))
     lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
-    uirevision_val = f"county|{map_id}|{state_filter or ''}|{county_filter or ''}"
+    if uirevision_val is None:
+        uirevision_val = f"county|{map_id}|{state_filter or ''}|{county_filter or ''}"
     is_mobile = is_mobile_request()
     if is_mobile:
         height = 240
@@ -818,7 +819,7 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
     )
     return fig
 
-def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, label_a, label_b, allowed_buckets, state_filter=None, excluded_states=None, excluded_counties=None, county_filter=None):
+def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, label_a, label_b, allowed_buckets, state_filter=None, excluded_states=None, excluded_counties=None, county_filter=None, uirevision_val=None):
     merged = county_levels_a.merge(county_levels_b, on=["fips", "county", "state"], suffixes=("_a", "_b"))
     if state_filter:
         merged = merged[merged["state"] == state_filter]
@@ -918,7 +919,8 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
         colorbar=colorbar_config
     ))
     lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
-    uirevision_val = f"diff|{state_filter or ''}|{county_filter or ''}"
+    if uirevision_val is None:
+        uirevision_val = f"diff|{state_filter or ''}|{county_filter or ''}"
     fig.update_layout(
         map=dict(
             style="carto-positron",
@@ -1030,77 +1032,83 @@ def get_county_geojson_url(state_filter=None):
     return "/assets/counties_10m.json"
 
 def make_controls():
-    return html.Div(className="controls-panel", children=[
-        html.Div(className="control-block", children=[
-            html.Label("Occupation(s)"),
-            dcc.Dropdown(id="occ-select", options=[], multi=True,
-                          placeholder="Select one or more occupations...",
-                          persistence=True, persistence_type="local")
-        ]),
-        html.Div(className="control-block", children=[
-            html.Label("Combine mode (for multiple jobs)"),
-            dcc.Dropdown(id="combine-mode",
-                         options=[{"label": v, "value": k} for k, v in COMBINE_MODES.items()],
-                         value="average", clearable=False,
-                         persistence=True, persistence_type="local")
-        ]),
-        html.Div(className="control-block", children=[
-            html.Label("Target salary ($)"),
-            dcc.Input(id="target-salary", type="text", value=str(DEFAULT_TARGET_SALARY),
-                       debounce=True, className="salary-field",
-                       persistence=True, persistence_type="local"),
-            html.Div(id="salary-validation-msg", className="validation-error", style={"marginTop": "4px", "fontSize": "11px"})
-        ]),
-        html.Div(className="control-block", children=[
-            html.Label("Exclude states"),
-            dcc.Dropdown(id="exclude-states", options=[], multi=True,
-                          placeholder="Select states to exclude",
-                          persistence=True, persistence_type="local")
-        ]),
-        html.Div(className="control-block", children=[
-            html.Label("Toggle wage-level buckets"),
-            dcc.Checklist(id="bucket-filter",
-                          options=[{"label": f" {b}", "value": b} for b in BUCKET_ORDER],
-                          value=BUCKET_ORDER, inline=True,
-                          persistence=True, persistence_type="local")
-        ]),
-        html.Div(className="control-block", children=[
-            html.Label("View mode"),
-            dcc.RadioItems(id="view-mode", options=[
-                {"label": " Map explorer", "value": "explore"},
-                {"label": " Compare two jobs", "value": "compare"},
-                {"label": " Rank occupations", "value": "rank"}
-            ], value="explore", inline=True,
-            persistence=True, persistence_type="local")
-        ]),
-        html.Div(className="control-block", children=[
-            html.Label("Map detail mode"),
-            dcc.RadioItems(id="map-level", options=[
-                {"label": " State overview (simplified)", "value": "state"},
-                {"label": " County detail (exact)", "value": "county"}
-            ], value="state", inline=True,
-            persistence=True, persistence_type="local")
-        ]),
-        html.Div(className="control-block", style={"minWidth": "340px"}, children=[
-            html.Div(style={"display": "flex", "gap": "10px"}, children=[
-                html.Div(style={"flex": "1"}, children=[
-                    html.Label("Inspect a state"),
-                    dcc.Dropdown(id="inspect-state", options=[], placeholder="Whole country...",
-                                 persistence=True, persistence_type="local")
-                ]),
-                html.Div(style={"flex": "1"}, children=[
-                    html.Label("Select a county"),
-                    dcc.Dropdown(id="inspect-county", options=[], placeholder="Select county...",
-                                 persistence=True, persistence_type="local")
-                ])
+    return html.Div(className="controls-scale-wrap", children=[
+    html.Div(className="controls-panel", children=[
+        html.Div(className="controls-row row-1", children=[
+            html.Div(className="control-block", children=[
+                html.Label("Occupation(s)"),
+                dcc.Dropdown(id="occ-select", options=[], multi=True,
+                              placeholder="Select one or more occupations...",
+                              persistence=True, persistence_type="local")
             ]),
-            html.Div(style={"display": "flex", "gap": "6px", "marginTop": "6px"}, children=[
-                html.Button("Reset Entire Map Exclusions", id="btn-reset-all", n_clicks=0,
-                            style={"fontSize": "11px", "padding": "2px 6px", "cursor": "pointer", "flex": "1"}),
-                html.Button("Reset Inspected State Exclusions", id="btn-reset-state", n_clicks=0,
-                            style={"fontSize": "11px", "padding": "2px 6px", "cursor": "pointer", "flex": "1"})
+            html.Div(className="control-block", children=[
+                html.Label("Combine mode (for multiple jobs)"),
+                dcc.Dropdown(id="combine-mode",
+                             options=[{"label": v, "value": k} for k, v in COMBINE_MODES.items()],
+                             value="average", clearable=False,
+                             persistence=True, persistence_type="local")
+            ]),
+            html.Div(className="control-block", children=[
+                html.Label("Target salary ($)"),
+                dcc.Input(id="target-salary", type="text", value=str(DEFAULT_TARGET_SALARY),
+                           debounce=True, className="salary-field",
+                           persistence=True, persistence_type="local"),
+                html.Div(id="salary-validation-msg", className="validation-error", style={"marginTop": "4px", "fontSize": "11px"})
+            ]),
+            html.Div(className="control-block", children=[
+                html.Label("Exclude states"),
+                dcc.Dropdown(id="exclude-states", options=[], multi=True,
+                              placeholder="Select states to exclude",
+                              persistence=True, persistence_type="local")
+            ]),
+            html.Div(className="control-block", children=[
+                html.Label("Toggle wage-level buckets"),
+                dcc.Checklist(id="bucket-filter",
+                              options=[{"label": f" {b}", "value": b} for b in BUCKET_ORDER],
+                              value=BUCKET_ORDER, inline=True,
+                              persistence=True, persistence_type="local")
+            ]),
+        ]),
+        html.Div(className="controls-row row-2", children=[
+            html.Div(className="control-block", children=[
+                html.Label("View mode"),
+                dcc.RadioItems(id="view-mode", options=[
+                    {"label": " Map explorer", "value": "explore"},
+                    {"label": " Compare two jobs", "value": "compare"},
+                    {"label": " Rank occupations", "value": "rank"}
+                ], value="explore", inline=True,
+                persistence=True, persistence_type="local")
+            ]),
+            html.Div(className="control-block", children=[
+                html.Label("Map detail mode"),
+                dcc.RadioItems(id="map-level", options=[
+                    {"label": " State overview (simplified)", "value": "state"},
+                    {"label": " County detail (exact)", "value": "county"}
+                ], value="state", inline=True,
+                persistence=True, persistence_type="local")
+            ]),
+            html.Div(className="control-block control-block-inspect", children=[
+                html.Div(className="inspect-row", children=[
+                    html.Div(className="inspect-field", children=[
+                        html.Label("Inspect a state"),
+                        dcc.Dropdown(id="inspect-state", options=[], placeholder="Whole country...",
+                                     persistence=True, persistence_type="local")
+                    ]),
+                    html.Div(className="inspect-field", children=[
+                        html.Label("Select a county"),
+                        dcc.Dropdown(id="inspect-county", options=[], placeholder="Select county...",
+                                     persistence=True, persistence_type="local")
+                    ])
+                ]),
+                html.Div(className="inspect-reset-row", children=[
+                    html.Button("Reset Entire Map Exclusions", id="btn-reset-all", n_clicks=0,
+                                className="inspect-reset-btn"),
+                    html.Button("Reset Inspected State Exclusions", id="btn-reset-state", n_clicks=0,
+                                className="inspect-reset-btn")
+                ])
             ])
         ])
+    ])
     ])
 
 def build_layout():
@@ -1231,15 +1239,86 @@ APP_CSS = """
 .app-shell { font-family: Arial, sans-serif; max-width: 1500px; margin: 0 auto; padding: 16px 16px; }
 .app-header h1 { margin-bottom: 4px; }
 .app-header p { color: #555; margin-top: 0; }
-.controls-panel { display: flex; flex-wrap: wrap; gap: 16px; background: #f7f7f9; box-sizing: border-box;
-    border: 1px solid #e2e2e6; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-.control-block { flex: 1 1 240px; min-width: 220px; }
-.controls-panel > .control-block:nth-child(-n+5) { flex: 1 1 calc((100% - 64px) / 5); min-width: 0; }
-.controls-panel > .control-block:nth-child(6) { flex: 0 0 360px; min-width: 360px; max-width: 360px; }
-.controls-panel > .control-block:nth-child(7) { flex: 0 0 500px; min-width: 500px; max-width: 500px; }
-.controls-panel > .control-block:nth-child(8) { flex: 1 1 0; min-width: 340px; }
-.control-block label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
-.salary-field { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+.controls-scale-wrap {
+    width: 100%;
+    overflow: visible;
+    margin-bottom: 16px;
+    position: relative;
+    z-index: 10000;
+}
+.controls-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: #f7f7f9;
+    box-sizing: border-box;
+    border: 1px solid #e2e2e6;
+    border-radius: 10px;
+    padding: 16px;
+    width: 1460px;
+    max-width: none;
+    transform-origin: top left;
+    position: relative;
+    z-index: 10000;
+    font-size: 15px;
+    overflow: visible;
+}
+.controls-row.row-1,
+.controls-row.row-2 {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 12px;
+    width: 100%;
+    align-items: flex-start;
+}
+.controls-row.row-1 > .control-block { flex: 1 1 0; min-width: 0; }
+.controls-row.row-2 > .control-block:nth-child(1) { flex: 0 0 320px; }
+.controls-row.row-2 > .control-block:nth-child(2) { flex: 0 0 420px; }
+.controls-row.row-2 > .control-block:nth-child(3) { flex: 1 1 0; min-width: 0; }
+.control-block { box-sizing: border-box; }
+.control-block label {
+    font-weight: 600;
+    font-size: 15px;
+    display: block;
+    margin-bottom: 6px;
+}
+.salary-field {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 15px;
+}
+.inspect-row { display: flex; flex-wrap: nowrap; gap: 10px; min-width: 0; }
+.inspect-field { flex: 1 1 0; min-width: 0; }
+.inspect-reset-row { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 6px; }
+.inspect-reset-btn {
+    font-size: 12px;
+    padding: 3px 7px;
+    cursor: pointer;
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.25;
+}
+.dash-dropdown, .Select { position: relative; z-index: 50; }
+.Select-control { position: relative; z-index: 1; }
+.Select.is-open, .Select--is-open { z-index: 10050 !important; }
+.Select-menu-outer, .dash-dropdown .Select-menu-outer, .Select-menu {
+    z-index: 10060 !important;
+    background: #fff !important;
+}
+.map-panel, .compare-maps { position: relative; z-index: 1; }
+.js-plotly-plot .hoverlayer,
+.js-plotly-plot .plotly .hoverlayer {
+    z-index: 1000 !important;
+    pointer-events: none !important;
+}
+.js-plotly-plot .mapboxgl-canvas,
+.js-plotly-plot .maplibregl-canvas {
+    z-index: 0 !important;
+}
 
 .map-panel {
     border: 1px solid #e2e2e6;
@@ -1484,16 +1563,39 @@ APP_CSS = """
     .app-shell {
         padding: 8px !important;
     }
+    .controls-scale-wrap {
+        height: auto !important;
+        overflow: visible !important;
+    }
     .controls-panel {
+        width: 100% !important;
+        transform: none !important;
         flex-direction: column !important;
         gap: 12px !important;
         padding: 12px !important;
+        font-size: 13px !important;
     }
+    .controls-row.row-1,
+    .controls-row.row-2 {
+        flex-direction: column !important;
+        flex-wrap: nowrap !important;
+        gap: 12px !important;
+    }
+    .controls-row.row-1 > .control-block,
+    .controls-row.row-2 > .control-block,
     .control-block {
         flex: 1 1 100% !important;
         width: 100% !important;
         min-width: 0 !important;
+        max-width: none !important;
     }
+    .controls-row.row-2 > .control-block:nth-child(1),
+    .controls-row.row-2 > .control-block:nth-child(2),
+    .controls-row.row-2 > .control-block:nth-child(3) {
+        flex: 1 1 100% !important;
+    }
+    .inspect-row { flex-direction: column !important; gap: 10px !important; }
+    .inspect-field { width: 100% !important; }
     .compare-controls {
         flex-direction: column !important;
         gap: 12px !important;
@@ -1712,13 +1814,18 @@ def register_callbacks(app: dash.Dash):
             return _empty_figure("Select at least one occupation above.")
         salary_val = parse_number(salary, DEFAULT_TARGET_SALARY)
         combine_mode = combine_mode or "average"
+        triggered_id = ctx.triggered_id
+        if triggered_id in ("inspect-state", "inspect-county", "map-level") or not triggered_id:
+            uirevision_val = f"force|{inspect_state or ''}|{inspect_county or ''}|{level}"
+        else:
+            uirevision_val = f"county|state-hex-map|{inspect_state or ''}|{inspect_county or ''}"
         if level == "county":
             county_levels = DATA.county_levels_for(occ_codes, combine_mode, salary_val)
             geojson = get_county_geojson(inspect_state)
             return build_county_choropleth_figure(
                 geojson, county_levels, salary_val, buckets,
                 state_filter=inspect_state, excluded_states=excluded, excluded_counties=excluded_counties, map_id="state-hex-map", county_filter=inspect_county,
-                show_legend=False
+                show_legend=False, uirevision_val=uirevision_val
             )
         state_levels = DATA.state_levels_for(occ_codes, combine_mode, salary_val)
         return build_state_hex_figure(state_levels, salary_val, excluded, buckets, show_legend=False, map_id="state-hex-map")
@@ -1744,6 +1851,11 @@ def register_callbacks(app: dash.Dash):
         if not occ_a or not occ_b:
             empty = _empty_figure("Pick a job for both A and B.")
             return empty, empty, empty, ""
+        triggered_id = ctx.triggered_id
+        if triggered_id in ("inspect-state", "inspect-county", "map-level", "view-mode") or not triggered_id:
+            uirevision_val = f"force|{inspect_state or ''}|{inspect_county or ''}|{level}"
+        else:
+            uirevision_val = f"county|compare|{inspect_state or ''}|{inspect_county or ''}"
         label_a, label_b = _occ_label(occ_a), _occ_label(occ_b)
         state_levels_a = DATA.state_levels_for([occ_a], "average", salary_val)
         state_levels_b = DATA.state_levels_for([occ_b], "average", salary_val)
@@ -1753,16 +1865,19 @@ def register_callbacks(app: dash.Dash):
             geojson = get_county_geojson(inspect_state)
             fig_a = build_county_choropleth_figure(
                 geojson, county_levels_a, salary_val, buckets,
-                state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-a", county_filter=inspect_county
+                state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-a", county_filter=inspect_county,
+                uirevision_val=uirevision_val
             )
             fig_b = build_county_choropleth_figure(
                 geojson, county_levels_b, salary_val, buckets,
-                state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-b", county_filter=inspect_county
+                state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-b", county_filter=inspect_county,
+                uirevision_val=uirevision_val
             )
             fig_diff = build_county_diff_figure(
                 geojson, county_levels_a, county_levels_b,
                 label_a, label_b, buckets, state_filter=inspect_state,
-                excluded_states=excluded, excluded_counties=excluded_counties, county_filter=inspect_county
+                excluded_states=excluded, excluded_counties=excluded_counties, county_filter=inspect_county,
+                uirevision_val=uirevision_val
             )
             title_text = f"County Difference: {label_a} vs {label_b}"
         else:
@@ -2280,6 +2395,9 @@ MOBILE_INTERACTION_JS = r"""
       if (e.touches.length > 1) {
         multiTouch = true;
         clearLP();
+        longPressFired = false;
+        fingerDown = false;
+        if (state === "INSPECTING") state = "NORMAL";
         getMapboxMap(plotlyGd(graphId))?.dragPan?.enable();
         return;
       }
@@ -2297,8 +2415,14 @@ MOBILE_INTERACTION_JS = r"""
 
     root.addEventListener("touchmove", function (e) {
       if (!isMobileUI()) return;
-      if (e.touches.length > 1) { multiTouch = true; clearLP(); return; }
-      if (!fingerDown) return;
+      if (e.touches.length > 1) {
+        multiTouch = true;
+        clearLP();
+        longPressFired = false;
+        if (state === "INSPECTING") state = "NORMAL";
+        return;
+      }
+      if (!fingerDown || multiTouch) return;
 
       const t = e.touches[0];
       const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
@@ -2318,10 +2442,11 @@ MOBILE_INTERACTION_JS = r"""
       if (!isMobileUI()) return;
       clearLP();
       if (multiTouch) {
-        multiTouch = !!e.touches?.length;
+        multiTouch = !!(e.touches && e.touches.length);
         if (!multiTouch) {
           fingerDown = false;
           longPressFired = false;
+          state = "NORMAL";
           getMapboxMap(plotlyGd(graphId))?.dragPan?.disable();
         }
         return;
@@ -2345,10 +2470,7 @@ MOBILE_INTERACTION_JS = r"""
       fingerDown = false;
       longPressFired = false;
       multiTouch = false;
-      if (state === "INSPECTING") {
-        state = "TOOLTIP_FROZEN";
-        keepTooltip(graphId);
-      }
+      state = "NORMAL";
     }, { passive: true, capture: true });
 
     root.addEventListener("click", function (e) {
@@ -2383,6 +2505,20 @@ MOBILE_INTERACTION_JS = r"""
         gd.__h1bHoverIdx = null;
         configureMapboxGestures(gd, graphId);
         showTooltip(graphId, null);
+        try {
+          const map = getMapboxMap(gd);
+          const mapLayout = gd._fullLayout && (gd._fullLayout.map || gd._fullLayout.mapbox);
+          const uirevision = (gd.layout && gd.layout.uirevision) || "";
+          if (map && mapLayout && String(uirevision).startsWith("force")) {
+            const c = mapLayout.center, z = mapLayout.zoom;
+            if (c && z != null) {
+              const lon = (c.lon !== undefined) ? c.lon : c.lng;
+              if (lon !== undefined && c.lat !== undefined) {
+                map.jumpTo({ center: [lon, c.lat], zoom: z });
+              }
+            }
+          }
+        } catch (e) {}
       });
       configureMapboxGestures(gd, graphId);
     }
@@ -2405,6 +2541,78 @@ MOBILE_INTERACTION_JS = r"""
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();
+</script>
+<script>
+(function () {
+  if (window.__h1bControlsScaleInstalled) return;
+  window.__h1bControlsScaleInstalled = true;
+  const DESIGN_W = 1460;
+
+  function isPhone() {
+    return window.matchMedia && window.matchMedia("(max-width: 767px)").matches;
+  }
+
+  function fitControls() {
+    const wrap = document.querySelector(".controls-scale-wrap");
+    const panel = document.querySelector(".controls-panel");
+    if (!wrap || !panel) return;
+
+    if (isPhone()) {
+      panel.style.width = "";
+      panel.style.transform = "";
+      wrap.style.height = "";
+      return;
+    }
+
+    panel.style.width = DESIGN_W + "px";
+    panel.style.transform = "none";
+    wrap.style.height = "auto";
+
+    const naturalH = panel.offsetHeight;
+    const avail = wrap.clientWidth;
+    if (avail <= 0) return;
+
+    const s = Math.min(1, avail / DESIGN_W);
+    panel.style.transformOrigin = "top left";
+    panel.style.transform = "scale(" + s + ")";
+    wrap.style.height = Math.ceil(naturalH * s) + "px";
+  }
+
+  function scheduleFit() {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(fitControls);
+    });
+  }
+
+  function bootScale() {
+    scheduleFit();
+    window.addEventListener("resize", scheduleFit);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", scheduleFit);
+    }
+    new MutationObserver(scheduleFit).observe(document.body, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"]
+    });
+    [100, 300, 800, 1500].forEach(function (ms) {
+      setTimeout(scheduleFit, ms);
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootScale);
+  } else {
+    bootScale();
+  }
+})();
+document.addEventListener('dblclick', e => {
+    const gd = e.target.closest('.js-plotly-plot');
+    const m = gd && gd._fullLayout && (gd._fullLayout.mapbox || gd._fullLayout.map);
+    const map = m && ((m._subplot && m._subplot.map) || m._map || m.map);
+    if (map) {
+      e.stopImmediatePropagation(); e.preventDefault();
+      map.jumpTo({ center: [-95.7129, 37.0902], zoom: (window.innerWidth < 768) ? 1.9 : 3.0 });
+    }
+  }, true);
 </script>
 """
 
