@@ -294,8 +294,3 @@ def get_county_geojson(state_filter=None):
     }
     _GEOJSON_BY_STATE[key] = filtered
     return filtered
-
-def get_county_geojson_url(state_filter=None):
-    if state_filter:
-        return f"/assets/counties_10m.json?state={state_filter.upper()}"
-    return "/assets/counties_10m.json"
