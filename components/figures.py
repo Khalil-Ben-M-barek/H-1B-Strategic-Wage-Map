@@ -6,7 +6,7 @@ from utils.constants import (
     HEX_BORDER_COLOR, NO_DATA_COLOR, DEACTIVATED_COLOR, DEACTIVATED_BORDER,
     LABEL_COLOR
 )
-from utils.data_loader import is_mobile_request, DATA, get_county_geojson_url, get_county_geojson
+from utils.data_loader import is_mobile_request, DATA, get_county_geojson
 from utils.wage_logic import classify_bucket, bucket_fill_color
 
 COL_UNIT = 0.5
@@ -278,7 +278,7 @@ def _get_map_center_and_zoom(state_filter=None, county_filter=None):
         return center_data[0], center_data[1], state_zoom
     return lat, lon, zoom
 
-def build_county_choropleth_figure(county_geojson, county_levels, salary, allowed_buckets, state_filter=None, show_legend=True, excluded_states=None, excluded_counties=None, map_id="", county_filter=None, uirevision_val=None):
+def build_county_choropleth_figure(county_geojson, county_levels, salary, allowed_buckets, state_filter=None, show_legend=True, excluded_states=None, excluded_counties=None, map_id="", county_filter=None, uirevision_val=None, force=False, force_camera=False, override_center=None, override_zoom=None):
     sub = county_levels.copy()
     if state_filter:
         sub = sub[sub["state"] == state_filter]
@@ -346,7 +346,7 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
         colorscale.append([i / n, color])
         colorscale.append([(i + 1) / n, color])
     fig = go.Figure(go.Choroplethmap(
-        geojson=get_county_geojson_url(state_filter), locations=locations, z=z,
+        geojson=county_geojson, locations=locations, z=z,
         featureidkey="id", colorscale=colorscale, zmin=-2, zmax=4,
         marker_line_color=HEX_BORDER_COLOR, marker_line_width=0.4,
         text=hover_text, hoverinfo="text",
@@ -358,20 +358,30 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
             ticktext=bands
         ) if show_legend else None
     ))
-    lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
+
     if uirevision_val is None:
         uirevision_val = f"county|{map_id}|{state_filter or ''}|{county_filter or ''}"
-    is_mobile = is_mobile_request()
-    if is_mobile:
-        height = 240
+
+    if override_center is not None and override_zoom is not None:
+        map_center = override_center
+        map_zoom = override_zoom
     else:
-        height = 400 if map_id in ("compare-map-a", "compare-map-b") else 560
+        lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
+        map_center = dict(lat=lat, lon=lon)
+        map_zoom = zoom
+
+    is_mobile = is_mobile_request()
+    height = 240 if is_mobile else (400 if map_id in ("compare-map-a", "compare-map-b") else 560)
+
+    map_layout = {
+        "style": "carto-positron",
+        "center": map_center,
+        "zoom": map_zoom,
+        "uirevision": uirevision_val,
+    }
+
     fig.update_layout(
-        map=dict(
-            style="carto-positron",
-            center=dict(lat=lat, lon=lon),
-            zoom=zoom
-        ),
+        map=map_layout,
         uirevision=uirevision_val,
         margin=(
             {"r": 10, "t": 10, "l": 10, "b": 0} if map_id in ("compare-map-a", "compare-map-b")
@@ -380,9 +390,10 @@ def build_county_choropleth_figure(county_geojson, county_levels, salary, allowe
         height=height,
         meta={"map_kind": "county"}
     )
+
     return fig
 
-def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, label_a, label_b, allowed_buckets, state_filter=None, excluded_states=None, excluded_counties=None, county_filter=None, uirevision_val=None):
+def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, label_a, label_b, allowed_buckets, state_filter=None, excluded_states=None, excluded_counties=None, county_filter=None, uirevision_val=None, force=False, force_camera=False, override_center=None, override_zoom=None):
     merged = county_levels_a.merge(county_levels_b, on=["fips", "county", "state"], suffixes=("_a", "_b"))
     if state_filter:
         merged = merged[merged["state"] == state_filter]
@@ -473,7 +484,7 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
         margin_config = {"r": 160, "t": 10, "l": 0, "b": 0}
         height = 500
     fig = go.Figure(go.Choroplethmap(
-        geojson=get_county_geojson_url(state_filter), locations=locations, z=z,
+        geojson=county_geojson, locations=locations, z=z,
         featureidkey="id", colorscale=colorscale, zmin=-6, zmax=4,
         marker_line_color=HEX_BORDER_COLOR, marker_line_width=0.4,
         text=hover_text, hoverinfo="text",
@@ -481,20 +492,33 @@ def build_county_diff_figure(county_geojson, county_levels_a, county_levels_b, l
         customdata=locations,
         colorbar=colorbar_config
     ))
-    lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
+
     if uirevision_val is None:
         uirevision_val = f"diff|{state_filter or ''}|{county_filter or ''}"
+
+    if override_center is not None and override_zoom is not None:
+        map_center = override_center
+        map_zoom = override_zoom
+    else:
+        lat, lon, zoom = _get_map_center_and_zoom(state_filter, county_filter)
+        map_center = dict(lat=lat, lon=lon)
+        map_zoom = zoom
+
+    map_layout = {
+        "style": "carto-positron",
+        "center": map_center,
+        "zoom": map_zoom,
+        "uirevision": uirevision_val,
+        "domain": dict(x=[0, 0.94], y=[0, 1]),
+    }
+
     fig.update_layout(
-        map=dict(
-            style="carto-positron",
-            center=dict(lat=lat, lon=lon),
-            zoom=zoom,
-            domain=dict(x=[0, 0.94], y=[0, 1])
-        ),
+        map=map_layout,
         uirevision=uirevision_val,
         margin=margin_config, height=height,
         meta={"map_kind": "county-diff"}
     )
+
     return fig
 
 def _empty_figure(message):

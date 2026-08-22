@@ -12,6 +12,9 @@
     "compare-map-diff": "mobile-tooltip-compare-diff"
   };
   const fingerCount = {};
+  let frozenGraphId = null;
+  let lastFrozenRaw = {};
+
   document.addEventListener("mouseleave", function (e) {
     if (e.target && e.target.classList && e.target.classList.contains("js-plotly-plot")) {
       const hoverlayer = e.target.querySelector(".hoverlayer");
@@ -56,24 +59,43 @@
       + (lines.length > 1 ? '<div class="tt-body">' + lines.slice(1).map(escapeHtml).join("<br>") + "</div>" : "");
   }
 
+  function reapplyFrozen() {
+    if (!frozenGraphId) return;
+    const el = document.getElementById(TOOLTIP_IDS[frozenGraphId]);
+    if (!el) return;
+    const raw = lastFrozenRaw[frozenGraphId];
+    if (raw) {
+      el.innerHTML = formatTooltipHtml(raw);
+      el.classList.add("is-active");
+    }
+  }
+
   function showTooltip(graphId, raw) {
+    if (!raw) {
+      if (frozenGraphId) {
+        reapplyFrozen();
+      }
+      return;
+    }
     Object.keys(TOOLTIP_IDS).forEach(function (gid) {
       const el = document.getElementById(TOOLTIP_IDS[gid]);
       if (!el) return;
-      if (gid === graphId && raw) {
-        const html = formatTooltipHtml(raw);
-        el.innerHTML = html;
-        el.classList.toggle("is-active", !!html);
+      if (gid === graphId) {
+        el.innerHTML = formatTooltipHtml(raw);
+        el.classList.add("is-active");
+        frozenGraphId = graphId;
+        lastFrozenRaw[graphId] = raw;
       } else {
         el.innerHTML = "";
         el.classList.remove("is-active");
+        delete lastFrozenRaw[gid];
       }
     });
   }
 
   function keepTooltip(graphId) {
-    const el = document.getElementById(TOOLTIP_IDS[graphId]);
-    if (el && el.innerHTML) el.classList.add("is-active");
+    frozenGraphId = graphId;
+    reapplyFrozen();
   }
 
   function plotlyGd(id) {
@@ -208,6 +230,22 @@
     return getMapboxMap(gd) ? hitTestMapbox(gd, clientX, clientY) : hitTestHex(gd, clientX, clientY);
   }
 
+  function installPlotlyClickGuard(gd, root) {
+    if (!gd || gd.__h1bClickGuardInstalled) return;
+    if (typeof gd.emit !== "function") return;
+
+    const originalEmit = gd.emit;
+    gd.__h1bOriginalEmit = originalEmit;
+    gd.emit = function () {
+      const eventName = arguments[0];
+      if (eventName === "plotly_click" && isMobileUI() && root.__h1bBlockPlotlyClick) {
+        return false;
+      }
+      return originalEmit.apply(this, arguments);
+    };
+    gd.__h1bClickGuardInstalled = true;
+  }
+
   function configureMapboxGestures(gd, graphId) {
     const map = getMapboxMap(gd);
     if (!map) return;
@@ -246,15 +284,18 @@
   }
 
   function bindTouchEvents(root, graphId) {
-    let state = "NORMAL", lpTimer = null, suppressClickUntil = 0;
+    let state = "NORMAL", lpTimer = null;
     let startX = 0, startY = 0, lastFeature = null;
     let fingerDown = false, longPressFired = false, multiTouch = false;
+
+    root.__h1bBlockPlotlyClick = false;
 
     const clearLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
 
     function beginInspect(x, y) {
       longPressFired = true;
       state = "INSPECTING";
+      root.__h1bBlockPlotlyClick = true;
       const gd = plotlyGd(graphId);
       configureMapboxGestures(gd, graphId);
       const feat = hitTest(gd, x, y);
@@ -272,6 +313,7 @@
         longPressFired = false;
         fingerDown = false;
         if (state === "INSPECTING") state = "NORMAL";
+        root.__h1bBlockPlotlyClick = true;
         getMapboxMap(plotlyGd(graphId))?.dragPan?.enable();
         return;
       }
@@ -280,6 +322,12 @@
       longPressFired = false;
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
+
+      const gd = plotlyGd(graphId);
+      if (hitTest(gd, startX, startY)) {
+        root.__h1bBlockPlotlyClick = false;
+      }
+
       clearLP();
       lpTimer = setTimeout(() => {
         lpTimer = null;
@@ -294,6 +342,7 @@
         clearLP();
         longPressFired = false;
         if (state === "INSPECTING") state = "NORMAL";
+        root.__h1bBlockPlotlyClick = true;
         return;
       }
       if (!fingerDown || multiTouch) return;
@@ -328,10 +377,10 @@
       if (!fingerDown) return;
       fingerDown = false;
       if (longPressFired || state === "INSPECTING") {
+        root.__h1bBlockPlotlyClick = true;
         state = "TOOLTIP_FROZEN";
         keepTooltip(graphId);
         longPressFired = false;
-        suppressClickUntil = Date.now() + 400;
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
         return;
@@ -345,10 +394,11 @@
       longPressFired = false;
       multiTouch = false;
       state = "NORMAL";
+      root.__h1bBlockPlotlyClick = true;
     }, { passive: true, capture: true });
 
     root.addEventListener("click", function (e) {
-      if (isMobileUI() && Date.now() < suppressClickUntil) {
+      if (isMobileUI() && root.__h1bBlockPlotlyClick) {
         e.stopPropagation();
         e.preventDefault();
       }
@@ -362,9 +412,24 @@
     }, true);
   }
 
+  document.addEventListener("click", function (e) {
+    if (!isMobileUI()) return;
+    let node = e.target;
+    while (node && node !== document) {
+      if (node.__h1bBlockPlotlyClick) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      node = node.parentNode;
+    }
+  }, true);
+
   function attachController(graphId) {
     const root = document.getElementById(graphId);
     if (!root) return;
+
+    const gd = plotlyGd(graphId);
 
     if (!root.__h1bTouchBound) {
       root.__h1bTouchBound = true;
@@ -372,29 +437,34 @@
       bindTouchEvents(root, graphId);
     }
 
-    const gd = plotlyGd(graphId);
-    if (gd && !gd.__h1bAfterplotBound) {
-      gd.__h1bAfterplotBound = true;
-      gd.on("plotly_afterplot", function () {
-        gd.__h1bHoverIdx = null;
-        configureMapboxGestures(gd, graphId);
-        showTooltip(graphId, null);
-        try {
-          const map = getMapboxMap(gd);
-          const mapLayout = gd._fullLayout && (gd._fullLayout.map || gd._fullLayout.mapbox);
-          const uirevision = (gd.layout && gd.layout.uirevision) || "";
-          if (map && mapLayout && String(uirevision).startsWith("force")) {
-            const c = mapLayout.center, z = mapLayout.zoom;
-            if (c && z != null) {
-              const lon = (c.lon !== undefined) ? c.lon : c.lng;
-              if (lon !== undefined && c.lat !== undefined) {
-                map.jumpTo({ center: [lon, c.lat], zoom: z });
+    if (gd) {
+      installPlotlyClickGuard(gd, root);
+
+      if (!gd.__h1bAfterplotBound) {
+        gd.__h1bAfterplotBound = true;
+        gd.on("plotly_afterplot", function () {
+          gd.__h1bHoverIdx = null;
+          configureMapboxGestures(gd, graphId);
+          if (frozenGraphId === graphId) {
+            reapplyFrozen();
+          }
+          try {
+            const map = getMapboxMap(gd);
+            const mapLayout = gd._fullLayout && (gd._fullLayout.map || gd._fullLayout.mapbox);
+            const uirevision = (gd.layout && gd.layout.uirevision) || "";
+            if (map && mapLayout && String(uirevision).startsWith("force")) {
+              const c = mapLayout.center, z = mapLayout.zoom;
+              if (c && z != null) {
+                const lon = (c.lon !== undefined) ? c.lon : c.lng;
+                if (lon !== undefined && c.lat !== undefined) {
+                  map.jumpTo({ center: [lon, c.lat], zoom: z });
+                }
               }
             }
-          }
-        } catch (e) {}
-      });
-      configureMapboxGestures(gd, graphId);
+          } catch (e) {}
+        });
+        configureMapboxGestures(gd, graphId);
+      }
     }
   }
 
@@ -477,6 +547,7 @@
     bootScale();
   }
 })();
+
 document.addEventListener('dblclick', e => {
     const gd = e.target.closest('.js-plotly-plot');
     const m = gd && gd._fullLayout && (gd._fullLayout.mapbox || gd._fullLayout.map);

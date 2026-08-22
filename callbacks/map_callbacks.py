@@ -2,20 +2,81 @@ import dash
 from dash import Input, Output, State, ctx
 import pandas as pd
 from utils.constants import BUCKET_ORDER, FIPS_TO_STATE, DEFAULT_TARGET_SALARY
-from utils.data_loader import DATA, get_county_geojson
+from utils.data_loader import DATA, get_county_geojson, is_mobile_request
 from utils.wage_logic import parse_number, _rank_sort, _clean_salary_string
 from components.figures import (
     build_county_choropleth_figure,
     build_county_diff_figure,
     build_state_hex_figure,
     build_diff_hex_figure,
-    _empty_figure
+    _empty_figure,
+    _get_map_center_and_zoom
 )
 from components.layouts import _occ_label
+from functools import lru_cache
 
 _CLICKABLE_MAP_IDS = ["state-hex-map", "compare-map-a", "compare-map-b", "compare-map-diff"]
 
+@lru_cache(maxsize=128)
+def _cached_get_county_geojson(state_filter):
+    return get_county_geojson(state_filter)
+
+@lru_cache(maxsize=128)
+def _cached_county_levels_for(occ_codes_tuple, combine_mode, salary_val):
+    if DATA is None:
+        return None
+    return DATA.county_levels_for(list(occ_codes_tuple), combine_mode, salary_val)
+
+@lru_cache(maxsize=128)
+def _cached_state_levels_for(occ_codes_tuple, combine_mode, salary_val):
+    if DATA is None:
+        return None
+    return DATA.state_levels_for(list(occ_codes_tuple), combine_mode, salary_val)
+
+def _extract_camera(relayout_data, state_filter=None, county_filter=None):
+    if not relayout_data or not isinstance(relayout_data, dict):
+        return None, None
+    center = relayout_data.get("map.center") or (relayout_data.get("map") or {}).get("center")
+    zoom   = relayout_data.get("map.zoom")   or (relayout_data.get("map") or {}).get("zoom")
+    if isinstance(center, dict) and "lat" in center:
+        lon = center.get("lon", center.get("lng"))
+        if lon is not None and zoom is not None:
+            cam_lat = float(center["lat"])
+            cam_lon = float(lon)
+            cam_zoom = float(zoom)
+            
+            default_lat, default_lon, default_zoom = _get_map_center_and_zoom(state_filter, county_filter)
+            lat_diff = abs(cam_lat - default_lat)
+            lon_diff = abs(cam_lon - default_lon)
+            
+            if default_zoom > 7.0:
+                if cam_zoom < 7.0 or lat_diff > 1.5 or lon_diff > 1.5:
+                    return None, None
+            elif default_zoom > 4.0:
+                if cam_zoom < 4.0 or lat_diff > 5.0 or lon_diff > 5.0:
+                    return None, None
+            
+            return {"lat": cam_lat, "lon": cam_lon}, cam_zoom
+    return None, None
+
+
 def register_callbacks(app: dash.Dash):
+
+    prefix = app.config.get("requests_pathname_prefix", "/")
+    if not prefix.endswith("/"):
+        prefix += "/"
+
+    @app.server.route(f"{prefix}geojson/<state_val>")
+    def serve_geojson(state_val):
+        import json
+        from flask import Response
+        s_val = None if state_val == "all" else state_val
+        geojson_data = _cached_get_county_geojson(s_val)
+        return Response(
+            json.dumps(geojson_data),
+            mimetype="application/json",
+            headers={"Cache-Control": "public, max-age=3600"}
+        )
 
     @app.callback(
         Output("occ-select", "options"), Output("exclude-states", "options"),
@@ -47,7 +108,6 @@ def register_callbacks(app: dash.Dash):
         return (show if mode == "explore" else hide,
                 show if mode == "compare" else hide,
                 show if mode == "rank" else hide)
-
 
     @app.callback(
         Output("exclude-states", "value"),
@@ -138,9 +198,10 @@ def register_callbacks(app: dash.Dash):
         Input("excluded-counties", "data"),
         Input("bucket-filter", "value"), Input("map-level", "value"),
         Input("inspect-state", "value"),
-        Input("inspect-county", "value")
+        Input("inspect-county", "value"),
+        State("state-hex-map", "relayoutData")
     )
-    def update_explore_map(occ_codes, combine_mode, salary, excluded, excluded_counties, buckets, level, inspect_state, inspect_county):
+    def update_explore_map(occ_codes, combine_mode, salary, excluded, excluded_counties, buckets, level, inspect_state, inspect_county, relayout_data):
         if DATA is None:
             raise dash.exceptions.PreventUpdate
         occ_codes = occ_codes or []
@@ -148,21 +209,42 @@ def register_callbacks(app: dash.Dash):
             return _empty_figure("Select at least one occupation above.")
         salary_val = parse_number(salary, DEFAULT_TARGET_SALARY)
         combine_mode = combine_mode or "average"
-        triggered_id = ctx.triggered_id
-        if triggered_id in ("inspect-state", "inspect-county", "map-level") or not triggered_id:
-            uirevision_val = f"force|{inspect_state or ''}|{inspect_county or ''}|{level}"
+
+        triggered = ctx.triggered_id
+        force = (triggered in ("inspect-state", "inspect-county", "map-level") or not triggered)
+
+        if force:
+            uirevision_val = f"force-{inspect_state or ''}|{inspect_county or ''}|{level}"
         else:
-            uirevision_val = f"county|state-hex-map|{inspect_state or ''}|{inspect_county or ''}"
-        if level == "county":
-            county_levels = DATA.county_levels_for(occ_codes, combine_mode, salary_val)
-            geojson = get_county_geojson(inspect_state)
-            return build_county_choropleth_figure(
-                geojson, county_levels, salary_val, buckets,
-                state_filter=inspect_state, excluded_states=excluded, excluded_counties=excluded_counties, map_id="state-hex-map", county_filter=inspect_county,
-                show_legend=False, uirevision_val=uirevision_val
-            )
-        state_levels = DATA.state_levels_for(occ_codes, combine_mode, salary_val)
-        return build_state_hex_figure(state_levels, salary_val, excluded, buckets, show_legend=False, map_id="state-hex-map")
+            uirevision_val = f"{inspect_state or ''}|{inspect_county or ''}|{level}"
+
+        if level != "county":
+            state_levels = _cached_state_levels_for(tuple(occ_codes), combine_mode, salary_val)
+            return build_state_hex_figure(state_levels, salary_val, excluded, buckets, show_legend=False, map_id="state-hex-map")
+
+        county_levels = _cached_county_levels_for(tuple(occ_codes), combine_mode, salary_val)
+        
+        geojson_url = app.get_relative_path(f"/geojson/{inspect_state or 'all'}")
+
+        if force:
+            cam_center, cam_zoom = None, None
+        else:
+            cam_center, cam_zoom = _extract_camera(relayout_data, inspect_state, inspect_county)
+
+        fig = build_county_choropleth_figure(
+            geojson_url, county_levels, salary_val, buckets,
+            state_filter=inspect_state, excluded_states=excluded,
+            excluded_counties=excluded_counties, map_id="state-hex-map",
+            county_filter=inspect_county, show_legend=False,
+            uirevision_val=uirevision_val, force=force,
+            override_center=cam_center, override_zoom=cam_zoom
+        )
+
+        if not force:
+            if cam_center is not None and cam_zoom is not None:
+                fig.update_layout(map=dict(center=cam_center, zoom=cam_zoom))
+
+        return fig
 
     @app.callback(
         Output("compare-map-a", "figure"), Output("compare-map-b", "figure"),
@@ -174,9 +256,13 @@ def register_callbacks(app: dash.Dash):
         Input("bucket-filter", "value"), Input("map-level", "value"),
         Input("inspect-state", "value"),
         Input("inspect-county", "value"),
-        Input("view-mode", "value")
+        Input("view-mode", "value"),
+        State("compare-map-a", "relayoutData"),
+        State("compare-map-b", "relayoutData"),
+        State("compare-map-diff", "relayoutData")
     )
-    def update_compare(occ_a, occ_b, salary, excluded, excluded_counties, buckets, level, inspect_state, inspect_county, view_mode):
+    def update_compare(occ_a, occ_b, salary, excluded, excluded_counties, buckets, level,
+                       inspect_state, inspect_county, view_mode, relayout_a, relayout_b, relayout_diff):
         if DATA is None:
             raise dash.exceptions.PreventUpdate
         if view_mode != "compare":
@@ -185,38 +271,73 @@ def register_callbacks(app: dash.Dash):
         if not occ_a or not occ_b:
             empty = _empty_figure("Pick a job for both A and B.")
             return empty, empty, empty, ""
-        triggered_id = ctx.triggered_id
-        if triggered_id in ("inspect-state", "inspect-county", "map-level", "view-mode") or not triggered_id:
-            uirevision_val = f"force|{inspect_state or ''}|{inspect_county or ''}|{level}"
-        else:
-            uirevision_val = f"county|compare|{inspect_state or ''}|{inspect_county or ''}"
+        
         label_a, label_b = _occ_label(occ_a), _occ_label(occ_b)
-        state_levels_a = DATA.state_levels_for([occ_a], "average", salary_val)
-        state_levels_b = DATA.state_levels_for([occ_b], "average", salary_val)
+
+        triggered = ctx.triggered_id
+        force = (triggered in ("inspect-state", "inspect-county", "map-level", "view-mode") or not triggered)
+
+        if force:
+            uirevision_val = f"force-{inspect_state or ''}|{inspect_county or ''}|{level}"
+        else:
+            uirevision_val = f"{inspect_state or ''}|{inspect_county or ''}|{level}"
+
         if level == "county":
-            county_levels_a = DATA.county_levels_for([occ_a], "average", salary_val)
-            county_levels_b = DATA.county_levels_for([occ_b], "average", salary_val)
-            geojson = get_county_geojson(inspect_state)
+            county_levels_a = _cached_county_levels_for(tuple([occ_a]), "average", salary_val)
+            county_levels_b = _cached_county_levels_for(tuple([occ_b]), "average", salary_val)
+            
+            geojson_url = app.get_relative_path(f"/geojson/{inspect_state or 'all'}")
+
+            if force:
+                cam_center_a, cam_zoom_a = None, None
+                cam_center_b, cam_zoom_b = None, None
+                cam_center_diff, cam_zoom_diff = None, None
+            else:
+                cam_center_a, cam_zoom_a = _extract_camera(relayout_a, inspect_state, inspect_county)
+                cam_center_b, cam_zoom_b = _extract_camera(relayout_b, inspect_state, inspect_county)
+                cam_center_diff, cam_zoom_diff = _extract_camera(relayout_diff, inspect_state, inspect_county)
+
             fig_a = build_county_choropleth_figure(
-                geojson, county_levels_a, salary_val, buckets,
-                state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-a", county_filter=inspect_county,
-                uirevision_val=uirevision_val
+                geojson_url, county_levels_a, salary_val, buckets,
+                state_filter=inspect_state, show_legend=False,
+                excluded_states=excluded, excluded_counties=excluded_counties,
+                map_id="compare-map-a", county_filter=inspect_county,
+                uirevision_val=uirevision_val, force=force,
+                override_center=cam_center_a, override_zoom=cam_zoom_a
             )
             fig_b = build_county_choropleth_figure(
-                geojson, county_levels_b, salary_val, buckets,
-                state_filter=inspect_state, show_legend=False, excluded_states=excluded, excluded_counties=excluded_counties, map_id="compare-map-b", county_filter=inspect_county,
-                uirevision_val=uirevision_val
+                geojson_url, county_levels_b, salary_val, buckets,
+                state_filter=inspect_state, show_legend=False,
+                excluded_states=excluded, excluded_counties=excluded_counties,
+                map_id="compare-map-b", county_filter=inspect_county,
+                uirevision_val=uirevision_val, force=force,
+                override_center=cam_center_b, override_zoom=cam_zoom_b
             )
             fig_diff = build_county_diff_figure(
-                geojson, county_levels_a, county_levels_b,
+                geojson_url, county_levels_a, county_levels_b,
                 label_a, label_b, buckets, state_filter=inspect_state,
-                excluded_states=excluded, excluded_counties=excluded_counties, county_filter=inspect_county,
-                uirevision_val=uirevision_val
+                excluded_states=excluded, excluded_counties=excluded_counties,
+                county_filter=inspect_county,
+                uirevision_val=uirevision_val, force=force,
+                override_center=cam_center_diff, override_zoom=cam_zoom_diff
             )
+
+            if not force:
+                if cam_center_a is not None and cam_zoom_a is not None:
+                    fig_a.update_layout(map=dict(center=cam_center_a, zoom=cam_zoom_a))
+                if cam_center_b is not None and cam_zoom_b is not None:
+                    fig_b.update_layout(map=dict(center=cam_center_b, zoom=cam_zoom_b))
+                if cam_center_diff is not None and cam_zoom_diff is not None:
+                    fig_diff.update_layout(map=dict(center=cam_center_diff, zoom=cam_zoom_diff))
+
             title_text = f"County Difference: {label_a} vs {label_b}"
         else:
-            fig_a = build_state_hex_figure(state_levels_a, salary_val, excluded, buckets, occ_label=label_a, show_legend=False, map_id="compare-map-a")
-            fig_b = build_state_hex_figure(state_levels_b, salary_val, excluded, buckets, occ_label=label_b, show_legend=False, map_id="compare-map-b")
+            state_levels_a = _cached_state_levels_for(tuple([occ_a]), "average", salary_val)
+            state_levels_b = _cached_state_levels_for(tuple([occ_b]), "average", salary_val)
+            fig_a = build_state_hex_figure(state_levels_a, salary_val, excluded, buckets,
+                                           occ_label=label_a, show_legend=False, map_id="compare-map-a")
+            fig_b = build_state_hex_figure(state_levels_b, salary_val, excluded, buckets,
+                                           occ_label=label_b, show_legend=False, map_id="compare-map-b")
             fig_diff = build_diff_hex_figure(state_levels_a, state_levels_b, label_a, label_b, excluded, buckets)
             title_text = f"Difference: {label_a} vs {label_b}"
         return fig_a, fig_b, fig_diff, title_text
